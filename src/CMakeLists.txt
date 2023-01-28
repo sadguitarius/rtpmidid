@@ -2,7 +2,7 @@ add_executable(
   rtpmidid-daemon  
   aseq.cpp stringpp.cpp
   main.cpp config.cpp rtpmidid.cpp
-  control_socket.cpp
+  control_socket.cpp jack.cpp
 )
 
 target_link_libraries(rtpmidid-daemon ${AVAHI_LIBRARIES})

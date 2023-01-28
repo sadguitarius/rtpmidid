@@ -28,6 +28,10 @@
 #include <rtpmidid/logger.hpp>
 #include <rtpmidid/rtpclient.hpp>
 #include <rtpmidid/rtpserver.hpp>
+#include "./jack.hpp"
+#include <jack/jack.h>
+#include <jack/ringbuffer.h>
+#include <jack/midiport.h>
 
 using namespace rtpmidid;
 using namespace std::chrono_literals;

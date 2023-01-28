@@ -26,6 +26,10 @@
 #include <set>
 #include <string>
 #include <optional>
+#include "./jack.hpp"
+#include <jack/jack.h>
+#include <jack/ringbuffer.h>
+#include <jack/midiport.h>
 
 namespace rtpmidid {
 struct config_t;
