@@ -84,9 +84,9 @@ rtpmidid_t::add_rtpmidi_client(const std::string &connect_to) {
   if (s.size() == 1) {
     return add_rtpmidi_client(s[0], s[0], "5004");
   } else if (s.size() == 2) {
-    return add_rtpmidi_client(s[0], s[0], s[1].c_str());
+    return add_rtpmidi_client(s[0], s[0], s[1]);
   } else if (s.size() == 3) {
-    return add_rtpmidi_client(s[0], s[1], s[2].c_str());
+    return add_rtpmidi_client(s[0], s[1], s[2]);
   } else {
     ERROR("Invalid remote address. Format is host, name:host, or "
           "name:host:port. Host can be a hostname, ip4 address, or [ip6] "
@@ -115,7 +115,7 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
 
   auto wrtpserver = std::weak_ptr(rtpserver);
   rtpserver->connected_event.connect(
-      [this, wrtpserver, port](std::shared_ptr<::rtpmidid::rtppeer> peer) {
+      [this, wrtpserver, port](const std::shared_ptr<::rtpmidid::rtppeer>& peer) {
         if (wrtpserver.expired()) {
           return;
         }
@@ -178,7 +178,7 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
 
   announce_rtpmidid_server(name, server->control_port);
 
-  seq.midi_event[alsaport].connect([this, server](snd_seq_event_t *ev) {
+  seq.midi_event[alsaport].connect([server](snd_seq_event_t *ev) {
     io_bytes_writer_static<4096> buffer;
     alsamidi_to_midiprotocol(ev, buffer);
     server->send_midi_to_all_peers(buffer);
@@ -280,7 +280,7 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
 
   INFO("New alsa port: {}, connects to host: {}, port: {}, name: {}", aseq_port,
        address, net_port, name);
-  known_clients[aseq_port] = std::move(peer_info);
+  known_clients[name] = std::move(peer_info);
 
   seq.subscribe_event[aseq_port].connect(
       [this, aseq_port](aseq::port_t port, const std::string &name) {
@@ -288,8 +288,8 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
         connect_client(fmt::format("{}/{}", this->name, name), aseq_port);
       });
   seq.unsubscribe_event[aseq_port].connect(
-      [this, aseq_port](aseq::port_t port) {
-        auto peer_info = &known_clients[aseq_port];
+      [this, &name](aseq::port_t port) {
+        auto peer_info = &known_clients[name];
         if (peer_info->use_count > 0)
           peer_info->use_count--;
 
@@ -300,18 +300,18 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
           peer_info->peer = nullptr;
         }
       });
-  seq.midi_event[aseq_port].connect([this, aseq_port](snd_seq_event_t *ev) {
-    this->recv_alsamidi_event(aseq_port, ev);
+  seq.midi_event[aseq_port].connect([this, name](snd_seq_event_t *ev) {
+    this->recv_alsamidi_event(name, ev);
   });
 
-  jack.subscribe_event[aseq_port].connect(
-      [this, aseq_port](jack::port_t port, const std::string &name) {
+  jack.subscribe_event[name].connect(
+      [this, aseq_port](const jack::io_port_t& port, const std::string &name) {
         // DEBUG("Callback on subscribe at rtpmidid: {}", name);
         connect_client(fmt::format("{}/{}", this->name, name), aseq_port);
       });
-  jack.unsubscribe_event[aseq_port].connect(
-      [this, aseq_port](jack::port_t port) {
-        auto peer_info = &known_clients[aseq_port];
+  jack.unsubscribe_event[name].connect(
+      [this, &name](const jack::io_port_t& port) {
+        auto peer_info = &known_clients[name];
         if (peer_info->use_count > 0)
           peer_info->use_count--;
 
@@ -331,22 +331,16 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
 
 void rtpmidid_t::remove_rtpmidi_client(const std::string &name) {
   INFO("Removing rtp midi client {}", name);
-
-  for (auto I = known_clients.begin(), endI = known_clients.end(); I != endI;
-       ++I) {
-    if ((*I).second.name == name) {
-      auto &known = *I;
-      DEBUG("Found client to delete: alsa port {}. Deletes all known addreses.",
-            known.first);
-      remove_client(known.first);
-      return;
-    }
+  if (known_clients.find(name) != known_clients.end()) {
+    DEBUG("Found client to delete: {}, alsa port {}. Deletes all known addreses.",
+          name, known_clients[name].aseq_port);
+    remove_client(name);
   }
   // WARNING("Service is not currently known to delete: {}", name);
 }
 
 void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
-  auto peer_info = &known_clients[aseq_port];
+  auto peer_info = &known_clients[name];
   if (peer_info->peer) {
     if (peer_info->peer->peer.status == rtppeer::CONNECTED) {
       peer_info->use_count++;
@@ -363,8 +357,8 @@ void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
           this->recv_rtpmidi_event(aseq_port, pb);
         });
     peer_info->peer->peer.disconnect_event.connect(
-        [this, aseq_port](rtppeer::disconnect_reason_e reason) {
-          this->disconnect_client(aseq_port, reason);
+        [this, name](rtppeer::disconnect_reason_e reason) {
+          this->disconnect_client(name, reason);
         });
     peer_info->use_count++;
     DEBUG("Subscribed another local client to peer {} at rtpmidid (users {})",
@@ -374,7 +368,7 @@ void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
   }
 }
 
-void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
+void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
   constexpr const char *failure_reasons[] = {"",
                                              "can't connect",
                                              "peer disconnected",
@@ -383,12 +377,12 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
                                              "connection timeout",
                                              "CK timeout"};
 
-  auto peer_info = &known_clients[aseq_port];
+  auto peer_info = &known_clients[name];
   auto reason = static_cast<rtppeer::disconnect_reason_e>(reasoni);
 
-  DEBUG("Disconnect aseq port {}, signal: {}({})", aseq_port,
+  DEBUG("Disconnect aseq port {}, signal: {}({})", peer_info->aseq_port,
         failure_reasons[reason], reason);
-  // If cant connec t(network problem) or rejected, try again in next
+  // If unable to connect(network problem) or rejected, try again in next
   // address.
   switch (reason) {
   case rtppeer::disconnect_reason_e::CANT_CONNECT:
@@ -397,14 +391,14 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
       ERROR("Too many attempts to connect. Not trying again. Attempted "
             "{} times.",
             peer_info->connect_attempts);
-      remove_client(peer_info->aseq_port);
+      remove_client(name);
       return;
     }
 
     peer_info->connect_attempts += 1;
     peer_info->peer->connect_timer = poller.add_timer_event(1s, [peer_info] {
       peer_info->addr_idx =
-          (peer_info->addr_idx + 1) % peer_info->addresses.size();
+          (peer_info->addr_idx + 1) % (int)peer_info->addresses.size();
       DEBUG("Try connect next in list. Idx {}/{}", peer_info->addr_idx,
             peer_info->addresses.size());
       // Try next
@@ -420,7 +414,6 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
                                                                : "setup");
     // remove_client(peer_info->aseq_port);
     return;
-    break;
 
   case rtppeer::disconnect_reason_e::PEER_DISCONNECTED:
     seq.disconnect_port(peer_info->aseq_port);
@@ -430,8 +423,8 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
             peer_info->name, peer_info->use_count);
     // Delete it, but later as we are here because of a call inside the peer
     if (peer_info->use_count == 0) {
-      poller.call_later([this, aseq_port] {
-        auto peer_info = &known_clients[aseq_port];
+      poller.call_later([this, name] {
+        auto peer_info = &known_clients[name];
         if (peer_info)
           peer_info->peer = nullptr;
       });
@@ -447,11 +440,11 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
 
   default:
     ERROR("Other reason: {}", reason);
-    remove_client(peer_info->aseq_port);
+    remove_client(name);
   }
 }
 
-void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
+void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) const {
   uint8_t current_command = 0;
   snd_seq_event_t ev;
 
@@ -580,7 +573,6 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
     default:
       WARNING("MIDI command type {:02X} not implemented yet", type);
       return;
-      break;
     }
     snd_seq_ev_set_source(&ev, port);
     snd_seq_ev_set_subs(&ev);
@@ -590,17 +582,16 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
     // one frame. We ignore this
     if (midi_data.position < midi_data.end)
       midi_data.read_uint8();
-    ;
   }
 }
 
-void rtpmidid_t::recv_alsamidi_event(int aseq_port, snd_seq_event *ev) {
+void rtpmidid_t::recv_alsamidi_event(const std::string &name, snd_seq_event *ev) {
   // DEBUG("Callback on midi event at rtpmidid, port {}", aseq_port);
-  auto peer_info = &known_clients[aseq_port];
+  auto peer_info = &known_clients[name];
   if (!peer_info->peer) {
     ERROR("There is no peer but I received an event! This situation should "
-          "NEVER happen. File a bug. Port {}",
-          aseq_port);
+          "NEVER happen. File a bug. Port {}, alsa port #{}",
+          name, known_clients[name].aseq_port);
     return;
   }
 
@@ -682,9 +673,9 @@ void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
     stream.write_uint8(ev->data.control.value & 0x0FF);
     break;
   case SND_SEQ_EVENT_SYSEX: {
-    ssize_t len = ev->data.ext.len, sz = stream.size();
+    ssize_t len = ev->data.ext.len, sz = (int)stream.size();
     if (len <= sz) {
-      uint8_t *data = (unsigned char *)ev->data.ext.ptr;
+      auto *data = (unsigned char *)ev->data.ext.ptr;
       for (ssize_t i = 0; i < len; i++) {
         stream.write_uint8(data[i]);
       }
@@ -695,31 +686,30 @@ void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
   default:
     WARNING("Event type not yet implemented! Not sending. {}", ev->type);
     return;
-    break;
   }
 }
 
-void rtpmidid_t::remove_client(uint8_t port) {
+void rtpmidid_t::remove_client(const std::string &name) {
   // We add it to the poller queue as GC, as the peer
   // might be further used at this call point.
-  poller.call_later([this, port] {
-    if (known_clients.find(port) == known_clients.end()) {
+  poller.call_later([this, name] {
+    if (known_clients.find(name) == known_clients.end()) {
       DEBUG("Removing peer already removed from known peers list. Port {}",
-            port);
+            name);
       return;
     }
-    DEBUG("Removing peer from known peers list. Port {}", port);
+    DEBUG("Removing peer from known peers list. Port {}", name);
+    auto port = known_clients[name].aseq_port;
     seq.remove_port(port);
     seq.subscribe_event[port].disconnect_all();
     seq.unsubscribe_event[port].disconnect_all();
     seq.midi_event[port].disconnect_all();
-    auto port_name = known_clients[port].name;
-    jack.remove_port(port_name);
-    jack.subscribe_event[port].disconnect_all();
-    jack.unsubscribe_event[port].disconnect_all();
-    jack.midi_event[port].disconnect_all();
+    jack.remove_port(name);
+    jack.subscribe_event[name].disconnect_all();
+    jack.unsubscribe_event[name].disconnect_all();
+    jack.midi_event[name].disconnect_all();
 
     // Last as may be used in the shutdown of the client.
-    known_clients.erase(port);
+    known_clients.erase(name);
   });
 }

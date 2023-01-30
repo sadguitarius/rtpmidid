@@ -69,16 +69,6 @@ void jack::remove_port(const std::string &name) {
   jack_port_unregister(client, ports[name].out_port);
 }
 
-std::vector<std::string> jack::get_port_names() {
-  std::vector<std::string> ret;
-
-  for (const auto& i: ports) {
-    ret.push_back(i.second.name);
-  }
-
-  return ret;
-}
-
 void jack::disconnect_port(std::string &port) {
   DEBUG("Disconnect Jack port {}", port);
 }

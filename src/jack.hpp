@@ -30,31 +30,21 @@
 namespace rtpmidid {
 class jack {
 public:
-  struct port_t {
-    std::string client;
-    std::string port;
-//    jack_ringbuffer_t *in_buffer;
-//    jack_ringbuffer_t *out_buffer;
-
-    port_t(std::string &a, std::string &b) : client(a), port(b) {
-//      in_buffer = new jack_ringbuffer_t;
-//      out_buffer = new jack_ringbuffer_t;
-    }
-  };
-
   struct io_port_t {
+    std::string client;
     std::string name;
     jack_port_t *in_port;
     jack_port_t *out_port;
+    jack_ringbuffer_t *in_buffer;
+    jack_ringbuffer_t *out_buffer;
   };
 
   std::string name;
-  std::map<int, signal_t<port_t, const std::string &>> subscribe_event;
-  std::map<int, signal_t<port_t>> unsubscribe_event;
-  std::map<std::string name, signal_t<jack_midi_event_t *>> midi_event;
-  std::vector<std::string> get_port_names();
+  std::map<std::string, signal_t<io_port_t, const std::string &>> subscribe_event;
+  std::map<std::string, signal_t<io_port_t>> unsubscribe_event;
+  std::map<std::string, signal_t<jack_midi_event_t *>> midi_event;
 
-  jack(std::string name);
+  explicit jack(std::string name);
   ~jack();
 
   void read_ready();

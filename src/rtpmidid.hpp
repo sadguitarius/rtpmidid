@@ -67,13 +67,13 @@ public:
   ::rtpmidid::jack jack;
   ::rtpmidid::mdns_rtpmidi mdns_rtpmidi;
   // Local port id to client_info for connections
-  std::map<uint8_t, client_info> known_clients;
+  std::map<std::string, client_info> known_clients;
   std::map<uint8_t, server_conn_info> known_servers_connections;
   std::vector<std::shared_ptr<::rtpmidid::rtpserver>> servers;
   std::map<aseq::port_t, std::shared_ptr<::rtpmidid::rtpserver>> alsa_to_server;
   std::set<std::string> known_mdns_peers;
 
-  rtpmidid_t(const config_t &config);
+  explicit rtpmidid_t(const config_t &config);
 
   // Manual connect to a server.
   std::optional<uint8_t> add_rtpmidi_client(const std::string &hostdescription);
@@ -82,11 +82,11 @@ public:
                                             const std::string &port);
   void remove_rtpmidi_client(const std::string &name);
 
-  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data);
-  void recv_alsamidi_event(int port, snd_seq_event_t *ev);
+  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data) const;
+  void recv_alsamidi_event(const std::string &name, snd_seq_event_t *ev);
   void recv_jackmidi_event(std::string &port, jack_midi_event_t *ev);
 
-  void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
+  static void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
 
   void setup_alsa_seq();
   void setup_jack();
@@ -94,7 +94,7 @@ public:
   void announce_rtpmidid_server(const std::string &name, uint16_t port);
   void unannounce_rtpmidid_server(const std::string &name, uint16_t port);
   void connect_client(const std::string &name, int aseqport);
-  void disconnect_client(int aseqport,
+  void disconnect_client(const std::string &name,
                          //  disconnect_reason_e ellidded
                          int reason);
   // An import server is one that for each discovered connection, creates
@@ -109,6 +109,6 @@ public:
                                                         uint8_t alsaport,
                                                         aseq::port_t &from);
 
-  void remove_client(uint8_t alsa_port);
+  void remove_client(const std::string &name);
 };
 } // namespace rtpmidid
