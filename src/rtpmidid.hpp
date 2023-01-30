@@ -84,6 +84,7 @@ public:
 
   void recv_rtpmidi_event(int port, io_bytes_reader &midi_data);
   void recv_alsamidi_event(int port, snd_seq_event_t *ev);
+  void recv_jackmidi_event(std::string &port, jack_midi_event_t *ev);
 
   void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
 

@@ -304,6 +304,28 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
     this->recv_alsamidi_event(aseq_port, ev);
   });
 
+  jack.subscribe_event[aseq_port].connect(
+      [this, aseq_port](jack::port_t port, const std::string &name) {
+        // DEBUG("Callback on subscribe at rtpmidid: {}", name);
+        connect_client(fmt::format("{}/{}", this->name, name), aseq_port);
+      });
+  jack.unsubscribe_event[aseq_port].connect(
+      [this, aseq_port](jack::port_t port) {
+        auto peer_info = &known_clients[aseq_port];
+        if (peer_info->use_count > 0)
+          peer_info->use_count--;
+
+        DEBUG("Callback on unsubscribe at peer {} rtpmidid (users {})",
+              peer_info->name, peer_info->use_count);
+        if (peer_info->use_count <= 0) {
+          DEBUG("Real disconnection, no more users");
+          peer_info->peer = nullptr;
+        }
+      });
+  jack.midi_event[name].connect([this, name](jack_midi_event_t *ev) {
+    this->recv_jackmidi_event(const_cast<std::string &>(name), ev);
+  });
+
   return aseq_port;
 }
 
@@ -587,6 +609,21 @@ void rtpmidid_t::recv_alsamidi_event(int aseq_port, snd_seq_event *ev) {
   peer_info->peer->peer.send_midi(stream);
 }
 
+void rtpmidid_t::recv_jackmidi_event(std::string &port, jack_midi_event_t *ev) {
+  // DEBUG("Callback on midi event at rtpmidid, Jack port {}", port);
+//  auto peer_info = &known_clients[port];
+//  if (!peer_info->peer) {
+//    ERROR("There is no peer but I received an event! This situation should "
+//          "NEVER happen. File a bug. Port {}",
+//          port);
+//    return;
+//  }
+
+//  io_bytes_writer_static<4096> stream;
+//  jackmidi_to_midiprotocol(ev, stream);
+//  peer_info->peer->peer.send_midi(stream);
+}
+
 void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
                                           io_bytes_writer &stream) {
   switch (ev->type) {
@@ -663,7 +700,7 @@ void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
 }
 
 void rtpmidid_t::remove_client(uint8_t port) {
-  // We add it to the poller queue as as GC, as the peer
+  // We add it to the poller queue as GC, as the peer
   // might be further used at this call point.
   poller.call_later([this, port] {
     if (known_clients.find(port) == known_clients.end()) {

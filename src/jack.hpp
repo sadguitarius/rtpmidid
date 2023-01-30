@@ -51,7 +51,7 @@ public:
   std::string name;
   std::map<int, signal_t<port_t, const std::string &>> subscribe_event;
   std::map<int, signal_t<port_t>> unsubscribe_event;
-  std::map<int, signal_t<jack_midi_event_t *>> midi_event;
+  std::map<std::string name, signal_t<jack_midi_event_t *>> midi_event;
   std::vector<std::string> get_port_names();
 
   jack(std::string name);
@@ -67,7 +67,7 @@ public:
 private:
   jack_client_t *client;
 //  std::map<std::string, std::pair<jack_port_t*,jack_port_t*>> ports;
-  std::map<std::string, std::unique_ptr<io_port_t>> ports;
+  std::map<std::string, io_port_t> ports;
 };
 
 } // namespace rtpmidid

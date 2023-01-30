@@ -49,31 +49,31 @@ jack::~jack() {
 
 void jack::create_port(const std::string &name) {
 //  port.first = jack_port_register (client, fmt::format("name. in").c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
-  auto port = std::make_unique<io_port_t>();
-  port->name = name;
-  port->in_port = jack_port_register (client, fmt::format("{} in", name).c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+  io_port_t port;
+  port.name = name;
+  port.in_port = jack_port_register (client, fmt::format("{} in", name).c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 //  port.second = jack_port_register (client, fmt::format("name. out").c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
-  port->out_port = jack_port_register (client, fmt::format("{} out", name).c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
-  if (port->in_port == nullptr || port->out_port == nullptr) {
+  port.out_port = jack_port_register (client, fmt::format("{} out", name).c_str(), JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
+  if (port.in_port == nullptr || port.out_port == nullptr) {
     ERROR("Failed to create Jack ports for {}", name);
   }
-  ports[name].swap(port);
+  ports[name] = std::move(port);
 }
 
 void jack::remove_port(const std::string &name) {
-  if(ports[name]) {
-    jack_port_unregister(client, ports[name]->in_port);
-    jack_port_unregister(client, ports[name]->out_port);
-  } else {
+  if(ports.find(name) == ports.end()) {
     ERROR("Jack port {} does not exist, so cannot remove.");
+    return;
   }
+  jack_port_unregister(client, ports[name].in_port);
+  jack_port_unregister(client, ports[name].out_port);
 }
 
 std::vector<std::string> jack::get_port_names() {
   std::vector<std::string> ret;
 
   for (const auto& i: ports) {
-    ret.push_back(i.second->name);
+    ret.push_back(i.second.name);
   }
 
   return ret;
