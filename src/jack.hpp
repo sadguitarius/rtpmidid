@@ -21,6 +21,9 @@
 //#include <map>
 #include <string>
 //#include <vector>
+#include <jack/jack.h>
+#include <jack/midiport.h>
+#include <jack/ringbuffer.h>
 
 #include <rtpmidid/signal.hpp>
 
@@ -28,33 +31,43 @@ namespace rtpmidid {
 class jack {
 public:
   struct port_t {
-    uint8_t client;
-    uint8_t port;
+    std::string client;
+    std::string port;
+//    jack_ringbuffer_t *in_buffer;
+//    jack_ringbuffer_t *out_buffer;
 
-    port_t(uint8_t a, uint8_t b) : client(a), port(b) {}
-
-    bool operator<(const port_t &other) const {
-      return client < other.client && port < other.port;
+    port_t(std::string &a, std::string &b) : client(a), port(b) {
+//      in_buffer = new jack_ringbuffer_t;
+//      out_buffer = new jack_ringbuffer_t;
     }
+  };
+
+  struct io_port_t {
+    std::string name;
+    jack_port_t *in_port;
+    jack_port_t *out_port;
   };
 
   std::string name;
   std::map<int, signal_t<port_t, const std::string &>> subscribe_event;
   std::map<int, signal_t<port_t>> unsubscribe_event;
-//  std::map<int, signal_t<snd_seq_event_t *>> midi_event;
-  uint8_t client_id;
+  std::map<int, signal_t<jack_midi_event_t *>> midi_event;
+  std::vector<std::string> get_port_names();
 
   jack(std::string name);
   ~jack();
 
   void read_ready();
 
-  uint8_t create_port(const std::string &name);
-  void remove_port(uint8_t port);
+  void create_port(const std::string &name);
+  void remove_port(const std::string &name);
 
   /// Disconencts everything from this port
-  void disconnect_port(uint8_t port);
+  void disconnect_port(std::string &port);
+private:
+  jack_client_t *client;
+//  std::map<std::string, std::pair<jack_port_t*,jack_port_t*>> ports;
+  std::map<std::string, std::unique_ptr<io_port_t>> ports;
 };
 
-//std::vector<std::string> get_ports(aseq *);
 } // namespace rtpmidid

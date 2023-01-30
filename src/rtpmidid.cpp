@@ -21,6 +21,7 @@
 
 #include "./aseq.hpp"
 #include "./config.hpp"
+#include "./jack.hpp"
 #include "./rtpmidid.hpp"
 #include "./stringpp.hpp"
 #include "rtpmidid/exceptions.hpp"
@@ -28,7 +29,6 @@
 #include <rtpmidid/logger.hpp>
 #include <rtpmidid/rtpclient.hpp>
 #include <rtpmidid/rtpserver.hpp>
-#include "./jack.hpp"
 #include <jack/jack.h>
 #include <jack/ringbuffer.h>
 #include <jack/midiport.h>
@@ -37,9 +37,12 @@ using namespace rtpmidid;
 using namespace std::chrono_literals;
 
 rtpmidid_t::rtpmidid_t(const config_t &config)
-    : name(config.name), seq(fmt::format("rtpmidi {}", name)) {
+    : name(config.name), seq(fmt::format("rtpmidi {}", name)),
+      jack(fmt::format("rtpmidi {}", name))
+{
   setup_mdns();
   setup_alsa_seq();
+  setup_jack();
 
   for (auto &port : config.ports) {
     auto server = add_rtpmidid_import_server(config.name, port);
@@ -121,6 +124,7 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
         INFO("Remote client connects to local server at port {}. Name: {}",
              port, peer->remote_name);
         auto aseq_port = seq.create_port(peer->remote_name);
+        jack.create_port(peer->remote_name);
 
         peer->midi_event.connect([this, aseq_port](io_bytes_reader pb) {
           this->recv_rtpmidi_event(aseq_port, pb);
@@ -212,6 +216,23 @@ void rtpmidid_t::setup_alsa_seq() {
       });
 }
 
+void rtpmidid_t::setup_jack() {
+  // Export only one, but all data that is connected to it.
+  // add_export_port();
+  jack.create_port("Network");
+/*
+  seq.subscribe_event[alsaport].connect(
+      [this, alsaport](aseq::port_t from, const std::string &name) {
+        DEBUG("Connected to ALSA port {}:{}. Create network server for this "
+              "alsa data.",
+              from.client, from.port);
+
+        add_rtpmidid_export_server(fmt::format("{}/{}", this->name, name),
+                                   alsaport, from);
+      });
+*/
+}
+
 void rtpmidid_t::setup_mdns() {
   mdns_rtpmidi.discover_event.connect([this](const std::string &name,
                                              const std::string &address,
@@ -252,6 +273,7 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
   }
 
   uint8_t aseq_port = seq.create_port(name);
+  jack.create_port(name);
   auto peer_info = ::rtpmidid::client_info{
       name, {{address, net_port}}, 0, 0, nullptr, aseq_port,
   };
@@ -654,6 +676,11 @@ void rtpmidid_t::remove_client(uint8_t port) {
     seq.subscribe_event[port].disconnect_all();
     seq.unsubscribe_event[port].disconnect_all();
     seq.midi_event[port].disconnect_all();
+    auto port_name = known_clients[port].name;
+    jack.remove_port(port_name);
+    jack.subscribe_event[port].disconnect_all();
+    jack.unsubscribe_event[port].disconnect_all();
+    jack.midi_event[port].disconnect_all();
 
     // Last as may be used in the shutdown of the client.
     known_clients.erase(port);

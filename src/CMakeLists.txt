@@ -17,6 +17,10 @@ target_link_libraries(rtpmidid-daemon ${ALSA_LIBRARIES})
 target_include_directories(rtpmidid-daemon PUBLIC ${ALSA_INCLUDE_DIRS})
 target_compile_options(rtpmidid-daemon PUBLIC ${ALSA_CFLAGS_OTHER})
 
+target_link_libraries(rtpmidid-daemon ${JACK_LIBRARIES})
+target_include_directories(rtpmidid-daemon PUBLIC ${JACK_INCLUDE_DIRS})
+target_compile_options(rtpmidid-daemon PUBLIC ${JACK_CFLAGS_OTHER})
+
 target_link_libraries(rtpmidid-daemon rtpmidid-static)
 
 set_target_properties(rtpmidid-daemon PROPERTIES OUTPUT_NAME rtpmidid)

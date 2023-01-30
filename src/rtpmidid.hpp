@@ -19,6 +19,7 @@
 #pragma once
 
 #include "./aseq.hpp"
+#include "./jack.hpp"
 #include <memory>
 #include <optional>
 #include <rtpmidid/mdns_rtpmidi.hpp>
@@ -26,7 +27,6 @@
 #include <set>
 #include <string>
 #include <optional>
-#include "./jack.hpp"
 #include <jack/jack.h>
 #include <jack/ringbuffer.h>
 #include <jack/midiport.h>
@@ -64,6 +64,7 @@ class rtpmidid_t {
 public:
   std::string name;
   ::rtpmidid::aseq seq;
+  ::rtpmidid::jack jack;
   ::rtpmidid::mdns_rtpmidi mdns_rtpmidi;
   // Local port id to client_info for connections
   std::map<uint8_t, client_info> known_clients;
@@ -87,6 +88,7 @@ public:
   void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
 
   void setup_alsa_seq();
+  void setup_jack();
   void setup_mdns();
   void announce_rtpmidid_server(const std::string &name, uint16_t port);
   void unannounce_rtpmidid_server(const std::string &name, uint16_t port);
