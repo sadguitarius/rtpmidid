@@ -82,7 +82,7 @@ public:
                                             const std::string &port);
   void remove_rtpmidi_client(const std::string &name);
 
-  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data);
+  void recv_rtpmidi_event(const std::string &port_name, io_bytes_reader &midi_data);
   void recv_alsamidi_event(int aseq_port, snd_seq_event_t *ev);
   void recv_jackmidi_event(std::string &port, jack_midi_event_t *ev);
 

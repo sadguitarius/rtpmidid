@@ -35,7 +35,6 @@ public:
     std::string name;
     jack_port_t *in_port;
     jack_port_t *out_port;
-    jack_ringbuffer_t *in_buffer;
     jack_ringbuffer_t *out_buffer;
   };
 
@@ -58,6 +57,7 @@ private:
   jack_client_t *client;
 //  std::map<std::string, std::pair<jack_port_t*,jack_port_t*>> ports;
   std::map<std::string, io_port_t> ports;
+  static int process_callback(jack_nframes_t nframes, void *arg);
 };
 
 } // namespace rtpmidid

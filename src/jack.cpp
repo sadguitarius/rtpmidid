@@ -55,7 +55,8 @@ jack::jack(std::string _name) : name(std::move(_name)) {
         }
       },
       client);
-  //  jack_set_process_callback(client, jackProcessIn, &data);
+
+  jack_set_process_callback(client, process_callback, &ports);
 
   auto result = jack_activate(client);
   if (result != 0) {
@@ -99,5 +100,26 @@ void jack::remove_port(const std::string &name) {
 
 void jack::disconnect_port(std::string &port) {
   DEBUG("Disconnect Jack port {}", port);
+  auto jack_port = jack_port_by_name(client, port.c_str());
+  if (jack_port_get_connections(jack_port))
+    jack_port_disconnect(client, jack_port);
+  else
+    ERROR("Jack got command to disconnect {} but not connected.", port);
+}
+
+int jack::process_callback(jack_nframes_t nframes, void *arg) {
+  auto ports = static_cast<std::map<std::string, io_port_t> *>(arg);
+  jack_midi_event_t ev;
+  for (const auto& i: *ports) {
+    auto buffer = jack_port_get_buffer(i.second.in_port, nframes);
+    jack_nframes_t event_count = jack_midi_get_event_count(buffer);
+    if (event_count > 0) {
+      for (auto i = 0; i < event_count; ++i) {
+        jack_midi_event_get(&ev, buffer, i);
+        DEBUG("Jack MIDI event received. port: {}, event: {}");
+      }
+    }
+  }
+  return 0;
 }
 } // namespace rtpmidid

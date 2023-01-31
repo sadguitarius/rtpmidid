@@ -121,14 +121,16 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
         }
         auto rtpserver = wrtpserver.lock();
 
-        INFO("Remote client connects to local server at port {}. Name: {}",
-             port, peer->remote_name);
-        auto aseq_port = seq.create_port(peer->remote_name);
-        jack.create_port(peer->remote_name);
+        const std::string port_name = peer->remote_name;
 
-        DEBUG("I want to call recv_rtpmidi_event with port name {}", peer->remote_name);
-        peer->midi_event.connect([this, aseq_port](io_bytes_reader pb) {
-          this->recv_rtpmidi_event(aseq_port, pb);
+        INFO("Remote client connects to local server at port {}. Name: {}",
+             port, port_name);
+        auto aseq_port = seq.create_port(port_name);
+        jack.create_port(port_name);
+
+        DEBUG("I want to call recv_rtpmidi_event with port name {}", port_name);
+        peer->midi_event.connect([this, port_name](io_bytes_reader pb) {
+          this->recv_rtpmidi_event(port_name, pb);
         });
         seq.midi_event[aseq_port].connect(
             [this, aseq_port](snd_seq_event_t *ev) {
@@ -194,8 +196,8 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
       });
 
   DEBUG("I want to call recv_rtpmidi_event with port name {}", "Network");
-  server->midi_event.connect([this, alsaport](io_bytes_reader buffer) {
-    this->recv_rtpmidi_event(alsaport, buffer);
+  server->midi_event.connect([this](io_bytes_reader buffer) {
+    this->recv_rtpmidi_event("Network", buffer);
   });
 
   alsa_to_server[from] = server;
@@ -309,7 +311,7 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
   jack.subscribe_event[name].connect(
       [this, name](jack::io_port_t &port, const std::string &arg_name) {
          DEBUG("Jack callback on subscribe at rtpmidid: {}", name);
-//        connect_client(fmt::format("{}/{}", instance_name, arg_name), name);
+        connect_client(fmt::format("{}/{}", instance_name, arg_name), name);
       });
   jack.unsubscribe_event[name].connect(
       [this, name](jack::io_port_t &port) {
@@ -343,13 +345,6 @@ void rtpmidid_t::remove_rtpmidi_client(const std::string &name) {
 }
 
 void rtpmidid_t::connect_client(const std::string &client_name, const std::string &port_name) {
-/*
-  std::string port_name;
-  for (auto i: known_clients) {
-    if (i.second.aseq_port == aseq_port)
-      port_name = i.first;
-  }
-*/
   auto peer_info = &known_clients[port_name];
   if (peer_info->peer) {
     if (peer_info->peer->peer.status == rtppeer::CONNECTED) {
@@ -361,12 +356,11 @@ void rtpmidid_t::connect_client(const std::string &client_name, const std::strin
     }
   } else {
     auto &address = peer_info->addresses[peer_info->addr_idx];
-    auto aseq_port = peer_info->aseq_port;
     peer_info->peer = std::make_shared<rtpclient>(client_name);
     DEBUG("I want to call recv_rtpmidi_event with port name {}", peer_info->name);
     peer_info->peer->peer.midi_event.connect(
-        [this, aseq_port](io_bytes_reader pb) {
-          this->recv_rtpmidi_event(aseq_port, pb);
+        [this, port_name](io_bytes_reader pb) {
+          this->recv_rtpmidi_event(port_name, pb);
         });
     peer_info->peer->peer.disconnect_event.connect(
         [this, port_name](rtppeer::disconnect_reason_e reason) {
@@ -430,6 +424,7 @@ void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
 
   case rtppeer::disconnect_reason_e::PEER_DISCONNECTED:
     seq.disconnect_port(peer_info->aseq_port);
+    jack.disconnect_port(peer_info->name);
     if (peer_info->use_count > 0)
       peer_info->use_count--;
     WARNING("Peer disconnected {}. Aseq disconnect. ({} users)",
@@ -457,9 +452,10 @@ void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
   }
 }
 
-void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
+void rtpmidid_t::recv_rtpmidi_event(const std::string &port_name, io_bytes_reader &midi_data) {
   uint8_t current_command = 0;
   snd_seq_event_t ev;
+  auto aseq_port = known_clients[port_name].aseq_port;
 //  jack_midi_event_t j_ev;
   midi_data.print_hex(true);
 
@@ -590,7 +586,7 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
       return;
       break;
     }
-    snd_seq_ev_set_source(&ev, port);
+    snd_seq_ev_set_source(&ev, aseq_port);
     snd_seq_ev_set_subs(&ev);
     snd_seq_ev_set_direct(&ev);
     snd_seq_event_output_direct(seq.seq, &ev);
