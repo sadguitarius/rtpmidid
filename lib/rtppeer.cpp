@@ -349,7 +349,7 @@ void rtppeer::send_ck0() {
   response.write_uint64(ck2);
   response.write_uint64(ck3);
 
-  DEBUG("Send CK0 to {}", remote_name);
+//  DEBUG("Send CK0 to {}", remote_name);
 
   // DEBUG("Got packet CK");
   // buffer.print_hex(true);
@@ -364,8 +364,8 @@ void rtppeer::parse_feedback(io_bytes_reader &buffer) {
   buffer.position = buffer.start + 8;
   seq_nr_ack = buffer.read_uint16();
 
-  DEBUG("Got feedback until package {} / {}. No journal, so ignoring.",
-        seq_nr_ack, seq_nr);
+//  DEBUG("Got feedback until package {} / {}. No journal, so ignoring.",
+//        seq_nr_ack, seq_nr);
 }
 
 int rtppeer::next_midi_packet_length(io_bytes_reader &buffer) {

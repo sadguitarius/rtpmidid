@@ -40,8 +40,8 @@ public:
   };
 
   std::string name;
-  std::map<std::string, signal_t<io_port_t, const std::string &>> subscribe_event;
-  std::map<std::string, signal_t<io_port_t>> unsubscribe_event;
+  std::map<std::string, signal_t<io_port_t &, const std::string &>> subscribe_event;
+  std::map<std::string, signal_t<io_port_t &>> unsubscribe_event;
   std::map<std::string, signal_t<jack_midi_event_t *>> midi_event;
 
   explicit jack(std::string name);

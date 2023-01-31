@@ -62,7 +62,7 @@ struct server_conn_info {
 
 class rtpmidid_t {
 public:
-  std::string name;
+  std::string instance_name;
   ::rtpmidid::aseq seq;
   ::rtpmidid::jack jack;
   ::rtpmidid::mdns_rtpmidi mdns_rtpmidi;
@@ -82,8 +82,8 @@ public:
                                             const std::string &port);
   void remove_rtpmidi_client(const std::string &name);
 
-  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data) const;
-  void recv_alsamidi_event(const std::string &name, snd_seq_event_t *ev);
+  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data);
+  void recv_alsamidi_event(int aseq_port, snd_seq_event_t *ev);
   void recv_jackmidi_event(std::string &port, jack_midi_event_t *ev);
 
   static void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
@@ -93,7 +93,7 @@ public:
   void setup_mdns();
   void announce_rtpmidid_server(const std::string &name, uint16_t port);
   void unannounce_rtpmidid_server(const std::string &name, uint16_t port);
-  void connect_client(const std::string &name, int aseqport);
+  void connect_client(const std::string &client_name, const std::string &port_name);
   void disconnect_client(const std::string &name,
                          //  disconnect_reason_e ellidded
                          int reason);
