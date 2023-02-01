@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include <alsa/seq_event.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <string>
 
 #include "./aseq.hpp"
@@ -29,9 +29,6 @@
 #include <rtpmidid/logger.hpp>
 #include <rtpmidid/rtpclient.hpp>
 #include <rtpmidid/rtpserver.hpp>
-#include <jack/jack.h>
-#include <jack/ringbuffer.h>
-#include <jack/midiport.h>
 
 using namespace rtpmidid;
 using namespace std::chrono_literals;
@@ -84,9 +81,9 @@ rtpmidid_t::add_rtpmidi_client(const std::string &connect_to) {
   if (s.size() == 1) {
     return add_rtpmidi_client(s[0], s[0], "5004");
   } else if (s.size() == 2) {
-    return add_rtpmidi_client(s[0], s[0], s[1].c_str());
+    return add_rtpmidi_client(s[0], s[0], s[1]);
   } else if (s.size() == 3) {
-    return add_rtpmidi_client(s[0], s[1], s[2].c_str());
+    return add_rtpmidi_client(s[0], s[1], s[2]);
   } else {
     ERROR("Invalid remote address. Format is host, name:host, or "
           "name:host:port. Host can be a hostname, ip4 address, or [ip6] "
@@ -115,7 +112,7 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
 
   auto wrtpserver = std::weak_ptr(rtpserver);
   rtpserver->connected_event.connect(
-      [this, wrtpserver, port](std::shared_ptr<::rtpmidid::rtppeer> peer) {
+      [this, wrtpserver, port](const std::shared_ptr<::rtpmidid::rtppeer>& peer) {
         if (wrtpserver.expired()) {
           return;
         }
@@ -128,13 +125,12 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
         auto aseq_port = seq.create_port(port_name);
         jack.create_port(port_name);
 
-        DEBUG("I want to call recv_rtpmidi_event with port name {}", port_name);
         peer->midi_event.connect([this, port_name](io_bytes_reader pb) {
           this->recv_rtpmidi_event(port_name, pb);
         });
         seq.midi_event[aseq_port].connect(
-            [this, aseq_port](snd_seq_event_t *ev) {
-              auto peer_it = known_servers_connections.find(aseq_port);
+            [this, port_name](snd_seq_event_t *ev) {
+              auto peer_it = known_servers_connections.find(port_name);
               if (peer_it == std::end(known_servers_connections)) {
                 WARNING("Got MIDI event in an non existing anymore peer.");
                 return;
@@ -145,10 +141,26 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
               alsamidi_to_midiprotocol(ev, stream);
               conn->peer->send_midi(stream);
             });
-        peer->disconnect_event.connect([this, aseq_port](auto reason) {
+        jack.midi_event[port_name].connect(
+            [this, port_name](jack_midi_event_t *ev) {
+              auto peer_it = known_servers_connections.find(port_name);
+              if (peer_it == std::end(known_servers_connections)) {
+                WARNING("Got MIDI event in an non existing anymore peer.");
+                return;
+              }
+              auto conn = &peer_it->second;
+
+              io_bytes_writer_static<4096> stream;
+              for (uint32_t i = 0; i < ev->size; ++i) {
+                stream.write_uint8(ev->buffer[i]);
+              }
+              conn->peer->send_midi(stream);
+            });
+        peer->disconnect_event.connect([this, aseq_port, port_name](auto reason) {
           DEBUG("Remove aseq port {}", aseq_port);
           seq.remove_port(aseq_port);
-          known_servers_connections.erase(aseq_port);
+          jack.remove_port(port_name);
+          known_servers_connections.erase(port_name);
         });
 
         server_conn_info server_conn = {
@@ -157,7 +169,7 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
             rtpserver,
         };
 
-        known_servers_connections[aseq_port] = server_conn;
+        known_servers_connections[port_name] = server_conn;
       });
 
   return rtpserver;
@@ -181,9 +193,17 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
 
   announce_rtpmidid_server(name, server->control_port);
 
-  seq.midi_event[alsaport].connect([this, server](snd_seq_event_t *ev) {
+  seq.midi_event[alsaport].connect([server](snd_seq_event_t *ev) {
     io_bytes_writer_static<4096> buffer;
     alsamidi_to_midiprotocol(ev, buffer);
+    server->send_midi_to_all_peers(buffer);
+  });
+
+  jack.midi_event["Network"].connect([server](jack_midi_event_t *ev) {
+    io_bytes_writer_static<4096> buffer;
+    for (uint32_t i = 0; i < ev->size; ++i) {
+      buffer.write_uint8(ev->buffer[i]);
+    }
     server->send_midi_to_all_peers(buffer);
   });
 
@@ -195,7 +215,16 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
         alsa_to_server.erase(from);
       });
 
-  DEBUG("I want to call recv_rtpmidi_event with port name {}", "Network");
+/*
+  jack.unsubscribe_event[alsaport].connect(
+      [this, name, server](aseq::port_t from) {
+        // This should destroy the server.
+        unannounce_rtpmidid_server(name, server->control_port);
+        // TODO: disconnect from on_midi_event.
+        alsa_to_server.erase(from);
+      });
+*/
+
   server->midi_event.connect([this](io_bytes_reader buffer) {
     this->recv_rtpmidi_event("Network", buffer);
   });
@@ -327,7 +356,7 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
         }
       });
   jack.midi_event[name].connect([this, name](jack_midi_event_t *ev) {
-//    this->recv_jackmidi_event(aseq_port, ev);
+    this->recv_jackmidi_event(name, ev);
     DEBUG("Jack MIDI event callback called");
   });
 
@@ -357,7 +386,6 @@ void rtpmidid_t::connect_client(const std::string &client_name, const std::strin
   } else {
     auto &address = peer_info->addresses[peer_info->addr_idx];
     peer_info->peer = std::make_shared<rtpclient>(client_name);
-    DEBUG("I want to call recv_rtpmidi_event with port name {}", peer_info->name);
     peer_info->peer->peer.midi_event.connect(
         [this, port_name](io_bytes_reader pb) {
           this->recv_rtpmidi_event(port_name, pb);
@@ -404,7 +432,7 @@ void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
     peer_info->connect_attempts += 1;
     peer_info->peer->connect_timer = poller.add_timer_event(1s, [peer_info] {
       peer_info->addr_idx =
-          (peer_info->addr_idx + 1) % peer_info->addresses.size();
+          (peer_info->addr_idx + 1) % (int)(peer_info->addresses.size());
       DEBUG("Try connect next in list. Idx {}/{}", peer_info->addr_idx,
             peer_info->addresses.size());
       // Try next
@@ -420,7 +448,6 @@ void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
                                                                : "setup");
     // remove_client(peer_info->aseq_port);
     return;
-    break;
 
   case rtppeer::disconnect_reason_e::PEER_DISCONNECTED:
     seq.disconnect_port(peer_info->aseq_port);
@@ -452,11 +479,16 @@ void rtpmidid_t::disconnect_client(const std::string &name, int reasoni) {
   }
 }
 
+// TODO: figure out how Jack fits here, or else split into 2 functions
 void rtpmidid_t::recv_rtpmidi_event(const std::string &port_name, io_bytes_reader &midi_data) {
+  midi_to_alsa(port_name, midi_data);
+  jack.send_midi(port_name, midi_data);
+}
+
+void rtpmidid_t::midi_to_alsa(const std::string &port_name, io_bytes_reader &midi_data) {
   uint8_t current_command = 0;
   snd_seq_event_t ev;
   auto aseq_port = known_clients[port_name].aseq_port;
-//  jack_midi_event_t j_ev;
   midi_data.print_hex(true);
 
   while (midi_data.position < midi_data.end) {
@@ -584,7 +616,6 @@ void rtpmidid_t::recv_rtpmidi_event(const std::string &port_name, io_bytes_reade
     default:
       WARNING("MIDI command type {:02X} not implemented yet", type);
       return;
-      break;
     }
     snd_seq_ev_set_source(&ev, aseq_port);
     snd_seq_ev_set_subs(&ev);
@@ -594,14 +625,13 @@ void rtpmidid_t::recv_rtpmidi_event(const std::string &port_name, io_bytes_reade
     // one frame. We ignore this
     if (midi_data.position < midi_data.end)
       midi_data.read_uint8();
-    ;
   }
 }
 
 void rtpmidid_t::recv_alsamidi_event(int aseq_port, snd_seq_event *ev) {
   // DEBUG("Callback on midi event at rtpmidid, port {}", aseq_port);
   std::string name;
-  for (auto i: known_clients) {
+  for (const auto& i: known_clients) {
     if (i.second.aseq_port == aseq_port) {
       name = i.first;
     }
@@ -619,19 +649,21 @@ void rtpmidid_t::recv_alsamidi_event(int aseq_port, snd_seq_event *ev) {
   peer_info->peer->peer.send_midi(stream);
 }
 
-void rtpmidid_t::recv_jackmidi_event(std::string &port, jack_midi_event_t *ev) {
-  // DEBUG("Callback on midi event at rtpmidid, Jack port {}", port);
-//  auto peer_info = &known_clients[port];
-//  if (!peer_info->peer) {
-//    ERROR("There is no peer but I received an event! This situation should "
-//          "NEVER happen. File a bug. Port {}",
-//          port);
-//    return;
-//  }
+void rtpmidid_t::recv_jackmidi_event(const std::string &port, jack_midi_event_t *ev) {
+  DEBUG("Callback on midi event at rtpmidid, Jack port {}", port);
+  auto peer_info = &known_clients[port];
+  if (!peer_info->peer) {
+    ERROR("There is no peer but I received an event! This situation should "
+          "NEVER happen. File a bug. Port {}",
+          port);
+    return;
+  }
 
-//  io_bytes_writer_static<4096> stream;
-//  jackmidi_to_midiprotocol(ev, stream);
-//  peer_info->peer->peer.send_midi(stream);
+  io_bytes_writer_static<4096> stream;
+  for (uint32_t i = 0; i < ev->size; ++i) {
+    stream.write_uint8(ev->buffer[i]);
+  }
+  peer_info->peer->peer.send_midi(stream);
 }
 
 void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
@@ -692,9 +724,9 @@ void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
     stream.write_uint8(ev->data.control.value & 0x0FF);
     break;
   case SND_SEQ_EVENT_SYSEX: {
-    ssize_t len = ev->data.ext.len, sz = stream.size();
+    ssize_t len = ev->data.ext.len, sz = (int)(stream.size());
     if (len <= sz) {
-      uint8_t *data = (unsigned char *)ev->data.ext.ptr;
+      auto *data = (unsigned char *)ev->data.ext.ptr;
       for (ssize_t i = 0; i < len; i++) {
         stream.write_uint8(data[i]);
       }
@@ -705,12 +737,11 @@ void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
   default:
     WARNING("Event type not yet implemented! Not sending. {}", ev->type);
     return;
-    break;
   }
 }
 
 void rtpmidid_t::remove_client(const std::string &name) {
-  // We add it to the poller queue as as GC, as the peer
+  // We add it to the poller queue as GC, as the peer
   // might be further used at this call point.
   poller.call_later([this, name] {
     if (known_clients.find(name) == known_clients.end()) {

@@ -17,15 +17,13 @@
  */
 
 #pragma once
-//#include <functional>
-//#include <map>
 #include <string>
-//#include <vector>
 #include <jack/jack.h>
 #include <jack/midiport.h>
 #include <jack/ringbuffer.h>
 
 #include <rtpmidid/signal.hpp>
+#include <rtpmidid/iobytes.hpp>
 
 namespace rtpmidid {
 class jack {
@@ -33,9 +31,10 @@ public:
   struct io_port_t {
     std::string client;
     std::string name;
-    jack_port_t *in_port;
-    jack_port_t *out_port;
-    jack_ringbuffer_t *out_buffer;
+    jack_port_t *in_port{};
+    jack_port_t *out_port{};
+    jack_ringbuffer_t *out_buffer{};
+    jack_ringbuffer_t *size_buffer{};
   };
 
   std::string name;
@@ -46,16 +45,15 @@ public:
   explicit jack(std::string name);
   ~jack();
 
-  void read_ready();
-
   void create_port(const std::string &name);
   void remove_port(const std::string &name);
 
-  /// Disconencts everything from this port
+  // Disconnects everything from this port
   void disconnect_port(std::string &port);
+
+  void send_midi(const std::string &port_name, io_bytes_reader buffer);
 private:
   jack_client_t *client;
-//  std::map<std::string, std::pair<jack_port_t*,jack_port_t*>> ports;
   std::map<std::string, io_port_t> ports;
   static int process_callback(jack_nframes_t nframes, void *arg);
 };

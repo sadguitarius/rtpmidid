@@ -21,7 +21,8 @@
 #include <rtpmidid/exceptions.hpp>
 #include <rtpmidid/logger.hpp>
 #include <rtpmidid/poller.hpp>
-#include <cstdio>
+#include <rtpmidid/rtpclient.hpp>
+#include <stdio.h>
 
 namespace rtpmidid {
 void error_handler(const char *file, int line, const char *function, int err,
@@ -103,7 +104,8 @@ aseq::~aseq() {
  */
 void aseq::read_ready() {
   snd_seq_event_t *ev;
-  while ((snd_seq_event_input(seq, &ev)) > 0) {
+  int pending;
+  while ((pending = snd_seq_event_input(seq, &ev)) > 0) {
     // DEBUG("ALSA MIDI event: {}, pending: {} / {}", ev->type, pending,
     // snd_seq_event_input_pending(seq, 0));
 
@@ -164,7 +166,7 @@ void aseq::read_ready() {
   }
 }
 
-uint8_t aseq::create_port(const std::string &name) const {
+uint8_t aseq::create_port(const std::string &name) {
   auto caps = SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE |
               SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ;
   auto type = SND_SEQ_TYPE_INET;
@@ -179,11 +181,12 @@ void aseq::remove_port(uint8_t port) {
   midi_event.erase(port);
 }
 
-/*std::vector<std::string> get_ports(aseq *seq) {
+std::vector<std::string> get_ports(aseq *seq) {
   std::vector<std::string> ret;
 
   snd_seq_client_info_t *cinfo;
   snd_seq_port_info_t *pinfo;
+  int count;
 
   snd_seq_client_info_alloca(&cinfo);
   snd_seq_port_info_alloca(&pinfo);
@@ -194,6 +197,7 @@ void aseq::remove_port(uint8_t port) {
     // DEBUG("Test if client {}", snd_seq_client_info_get_name(cinfo));
     snd_seq_port_info_set_client(pinfo, snd_seq_client_info_get_client(cinfo));
     snd_seq_port_info_set_port(pinfo, -1);
+    count = 0;
     while (snd_seq_query_next_port(seq->seq, pinfo) >= 0) {
       // DEBUG("Test if port {}:{}", snd_seq_client_info_get_name(cinfo),
       // snd_seq_port_info_get_name(pinfo));
@@ -202,14 +206,15 @@ void aseq::remove_port(uint8_t port) {
         auto name = fmt::format("{}:{}", snd_seq_client_info_get_name(cinfo),
                                 snd_seq_port_info_get_name(pinfo));
         ret.push_back(std::move(name));
+        count++;
       }
     }
   }
 
   return ret;
-}*/
+}
 
-std::string aseq::get_client_name(snd_seq_addr_t *addr) const {
+std::string aseq::get_client_name(snd_seq_addr_t *addr) {
   snd_seq_client_info_t *client_info = nullptr;
   snd_seq_client_info_malloc(&client_info);
   snd_seq_get_any_client_info(seq, addr->client, client_info);
@@ -230,7 +235,8 @@ std::string aseq::get_client_name(snd_seq_addr_t *addr) const {
 }
 
 static void disconnect_port_at_subs(snd_seq_t *seq,
-                                    snd_seq_query_subscribe_t *subs) {
+                                    snd_seq_query_subscribe_t *subs,
+                                    uint8_t port) {
   snd_seq_port_subscribe_t *port_sub;
   snd_seq_port_subscribe_alloca(&port_sub);
 
@@ -264,7 +270,7 @@ static void disconnect_port_at_subs(snd_seq_t *seq,
   }
 }
 
-void aseq::disconnect_port(uint8_t port) const {
+void aseq::disconnect_port(uint8_t port) {
   DEBUG("Disconnect alsa port {}", port);
   snd_seq_query_subscribe_t *subs;
   snd_seq_port_info_t *portinfo;
@@ -277,6 +283,6 @@ void aseq::disconnect_port(uint8_t port) const {
   snd_seq_query_subscribe_alloca(&subs);
   snd_seq_query_subscribe_set_root(subs, snd_seq_port_info_get_addr(portinfo));
 
-  disconnect_port_at_subs(seq, subs);
+  disconnect_port_at_subs(seq, subs, port);
 }
 } // namespace rtpmidid

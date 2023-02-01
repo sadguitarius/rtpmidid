@@ -47,18 +47,18 @@ public:
   std::map<int, signal_t<snd_seq_event_t *>> midi_event;
   uint8_t client_id;
 
-  explicit aseq(std::string name);
+  aseq(std::string name);
   ~aseq();
 
   void read_ready();
-  std::string get_client_name(snd_seq_addr_t *addr) const;
+  std::string get_client_name(snd_seq_addr_t *addr);
 
-  uint8_t create_port(const std::string &name) const;
+  uint8_t create_port(const std::string &name);
   void remove_port(uint8_t port);
 
   /// Disconencts everything from this port
-  void disconnect_port(uint8_t port) const;
+  void disconnect_port(uint8_t port);
 };
 
-//std::vector<std::string> get_ports(aseq *);
+std::vector<std::string> get_ports(aseq *);
 } // namespace rtpmidid

@@ -27,9 +27,6 @@
 #include <set>
 #include <string>
 #include <optional>
-#include <jack/jack.h>
-#include <jack/ringbuffer.h>
-#include <jack/midiport.h>
 
 namespace rtpmidid {
 struct config_t;
@@ -68,7 +65,7 @@ public:
   ::rtpmidid::mdns_rtpmidi mdns_rtpmidi;
   // Local port id to client_info for connections
   std::map<std::string, client_info> known_clients;
-  std::map<uint8_t, server_conn_info> known_servers_connections;
+  std::map<const std::string, server_conn_info> known_servers_connections;
   std::vector<std::shared_ptr<::rtpmidid::rtpserver>> servers;
   std::map<aseq::port_t, std::shared_ptr<::rtpmidid::rtpserver>> alsa_to_server;
   std::set<std::string> known_mdns_peers;
@@ -83,8 +80,9 @@ public:
   void remove_rtpmidi_client(const std::string &name);
 
   void recv_rtpmidi_event(const std::string &port_name, io_bytes_reader &midi_data);
+  void midi_to_alsa(const std::string &port_name, io_bytes_reader &midi_data);
   void recv_alsamidi_event(int aseq_port, snd_seq_event_t *ev);
-  void recv_jackmidi_event(std::string &port, jack_midi_event_t *ev);
+  void recv_jackmidi_event(const std::string &port, jack_midi_event_t *ev);
 
   static void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
 
