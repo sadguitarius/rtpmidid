@@ -317,7 +317,7 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
 
   seq.subscribe_event[aseq_port].connect(
       [this, name](aseq::port_t port, const std::string &arg_name) {
-        // DEBUG("Callback on subscribe at rtpmidid: {}", name);
+         DEBUG("Callback on subscribe at rtpmidid: {}", name);
         connect_client(fmt::format("{}/{}", instance_name, arg_name), name);
       });
   seq.unsubscribe_event[aseq_port].connect(
@@ -337,13 +337,15 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
     this->recv_alsamidi_event(aseq_port, ev);
   });
 
-  jack.subscribe_event[name].connect(
-      [this, name](jack::io_port_t &port, const std::string &arg_name) {
-         DEBUG("Jack callback on subscribe at rtpmidid: {}", name);
+  DEBUG("populating jack event callbacks. name: {}, instance_name: {}", name, instance_name);
+  jack.subscribe_event[fmt::format("{} in", name)].connect(
+      [this, name](jack::port_t port, const std::string &arg_name) {
+        DEBUG("Jack callback on subscribe at rtpmidid: {}, instance_name: {}, arg_name", name, instance_name, arg_name);
         connect_client(fmt::format("{}/{}", instance_name, arg_name), name);
       });
-  jack.unsubscribe_event[name].connect(
-      [this, name](jack::io_port_t &port) {
+  jack.unsubscribe_event[fmt::format("{} in", name)].connect(
+      [this, name](jack::port_t port) {
+        DEBUG("Jack callback on unsubscribe at rtpmidid: {}, instance_name: {}, arg_name", name, instance_name);
         auto peer_info = &known_clients[name];
         if (peer_info->use_count > 0)
           peer_info->use_count--;

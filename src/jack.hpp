@@ -28,18 +28,26 @@
 namespace rtpmidid {
 class jack {
 public:
-  struct io_port_t {
+  struct port_t {
     std::string client;
-    std::string name;
+    std::string port;
+
+    port_t(std::string& a, std::string& b) : client(a), port(b) {}
+
+//    bool operator<(const port_t &other) const {
+//      return client < other.client && port < other.port;
+//    }
+  };
+
+  struct io_port_t {
+    std::string name{};
     jack_port_t *in_port{};
     jack_port_t *out_port{};
-    jack_ringbuffer_t *out_buffer{};
-    jack_ringbuffer_t *size_buffer{};
   };
 
   std::string name;
-  std::map<std::string, signal_t<io_port_t &, const std::string &>> subscribe_event;
-  std::map<std::string, signal_t<io_port_t &>> unsubscribe_event;
+  std::map<std::string, signal_t<port_t, const std::string &>> subscribe_event;
+  std::map<std::string, signal_t<port_t>> unsubscribe_event;
   std::map<std::string, signal_t<jack_midi_event_t *>> midi_event;
 
   explicit jack(std::string name);
@@ -53,9 +61,12 @@ public:
 
   void send_midi(const std::string &port_name, io_bytes_reader buffer);
 private:
+  static const constexpr auto ringbuffer_size = 16384;
   jack_client_t *client;
   std::map<std::string, io_port_t> ports;
   static int process_callback(jack_nframes_t nframes, void *arg);
+  jack_ringbuffer_t *out_buffer{};
+  jack_ringbuffer_t *size_buffer{};
 };
 
 } // namespace rtpmidid
