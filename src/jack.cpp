@@ -25,135 +25,179 @@
 
 namespace rtpmidid {
 
-jack::jack(std::string _name) : name(std::move(_name)) {
-  size_buffer = jack_ringbuffer_create(ringbuffer_size);
-  out_buffer = jack_ringbuffer_create(ringbuffer_size);
-
-  client = jack_client_open(name.c_str(), JackNoStartServer, nullptr);
-  if (client == nullptr) {
+jack::jack(std::string name) {
+  data.client_name = std::move(name);
+  data.client =
+      jack_client_open(data.client_name.c_str(), JackNoStartServer, nullptr);
+  if (data.client == nullptr) {
     ERROR("Failed to open Jack client.");
     return;
   }
 
   jack_set_port_connect_callback(
-      client,
+      data.client,
       [](jack_port_id_t a, jack_port_id_t b, int c, void *arg) {
-        auto instance = static_cast<jack *>(arg);
-        std::string from = jack_port_short_name(
-            jack_port_by_id(instance->client, a));
-        std::string to = jack_port_short_name(
-        jack_port_by_id(instance->client, b));
+        auto data = static_cast<client_data_t *>(arg);
+        std::string from, to;
+
+        for (auto p : data->ports) {
+          if (jack_port_by_id(data->client, a) == p.second.out_port) {
+            from = p.second.name;
+          }
+          if (jack_port_by_id(data->client, b) == p.second.in_port) {
+            to = p.second.name;
+          }
+        }
+
         if (c == 1) {
-          INFO("New Jack connection from {} to {} on {}", from, to, instance->name);
-          instance->subscribe_event[to](port_t(instance->name, to), instance->name);
+          INFO("New Jack connection from {} to {} on {}", from, to,
+               data->client_name);
+          (data->subscribe_event)[from](port_t(data->client_name, to),
+                                        data->client_name);
         } else {
-          INFO("Removed Jack connection from {} to {} on {}", from, to, instance->name);
-          instance->unsubscribe_event[to](port_t(instance->name, to));
+          INFO("Removed Jack connection from {} to {} on {}", from, to,
+               data->client_name);
+          (data->unsubscribe_event)[from](port_t(data->client_name, to));
         }
       },
-      this);
+      &data);
 
-  jack_set_process_callback(client, process_callback, this);
+  jack_set_process_callback(data.client, process_callback, this);
 
-  jack_activate(client);
+  jack_activate(data.client);
 }
 
 jack::~jack() {
-  for (auto i : ports) {
+  for (const auto &i : data.ports) {
     remove_port(i.first);
   }
 
-  if (client != nullptr) {
-    jack_client_close(client);
+  if (data.client != nullptr) {
+    jack_client_close(data.client);
   }
 }
 
 void jack::create_port(const std::string &name) {
-  io_port_t port;
+  port_data_t port;
   port.name = name;
-  port.in_port = jack_port_register(client, fmt::format("{} in", name).c_str(),
-                                    JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+  //  port.in_port = jack_port_register(client, fmt::format("{} in",
+  //  name).c_str(),
+  //                                    JACK_DEFAULT_MIDI_TYPE, JackPortIsInput,
+  //                                    0);
+  port.in_port =
+      jack_port_register(data.client, fmt::format("{} in", name).c_str(),
+                         JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
   port.out_port =
-      jack_port_register(client, fmt::format("{} out", name).c_str(),
+      jack_port_register(data.client, fmt::format("{} out", name).c_str(),
                          JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
   if (port.in_port == nullptr || port.out_port == nullptr) {
     ERROR("Failed to create Jack ports for {}", name);
   }
-  ports[name] = std::move(port);
+
+  port.size_buffer = jack_ringbuffer_create(client_data_t::ringbuffer_size);
+  port.in_buffer = jack_ringbuffer_create(client_data_t::ringbuffer_size);
+
+  data.ports[name] = std::move(port);
 }
 
 void jack::remove_port(const std::string &name) {
-  if (ports.find(name) == ports.end()) {
+  if (data.ports.find(name) == data.ports.end()) {
     ERROR("Jack port {} does not exist, so cannot remove.");
     return;
   }
-  jack_port_unregister(client, ports[name].in_port);
-  jack_port_unregister(client, ports[name].out_port);
-  jack_ringbuffer_free(out_buffer);
-  jack_ringbuffer_free(size_buffer);
-  ports.erase(name);
+  jack_port_unregister(data.client, data.ports[name].in_port);
+  jack_port_unregister(data.client, data.ports[name].out_port);
+  jack_ringbuffer_free(data.ports[name].in_buffer);
+  jack_ringbuffer_free(data.ports[name].size_buffer);
+  data.ports.erase(name);
 }
 
 void jack::disconnect_port(std::string &port) {
   DEBUG("Disconnect Jack port {}", port);
-  auto jack_port = jack_port_by_name(client, port.c_str());
+  auto jack_port = jack_port_by_name(data.client, port.c_str());
   if (jack_port_get_connections(jack_port))
-    jack_port_disconnect(client, jack_port);
+    jack_port_disconnect(data.client, jack_port);
   else
     ERROR("Jack got command to disconnect {} but not connected.", port);
 }
 
-void jack::send_midi(const std::string &port_name, io_bytes_reader midi_data) {
-  DEBUG("Sending MIDI from rtpmidi to jack port {}:", port_name);
-  midi_data.print_hex();
+void jack::midi_to_jack(const std::string &port_name,
+                        io_bytes_reader &midi_data) {
+  DEBUG("MIDI to Jack: received {} bytes of MIDI from {}", midi_data.size(),
+        port_name);
 
-  auto msg_buffer = out_buffer;
-  auto size_buffer = out_buffer;
-  auto midi_data_len = midi_data.size();
+  auto port = data.ports[port_name];
+  auto in_buffer = port.in_buffer;
+  //  auto size_buffer = port.size_buffer;
+  //  auto midi_data_len = midi_data.size();
 
+  midi_data.position = midi_data.start;
   while (midi_data.position < midi_data.end) {
     const char v = (char)midi_data.read_uint8();
-    jack_ringbuffer_write(msg_buffer, &v, 1);
-    jack_ringbuffer_write(size_buffer, (char*)&midi_data_len, sizeof(midi_data_len));
+    DEBUG("Writing MIDI byte {:#02x} to Jack input buffer", uint8_t(v));
+    jack_ringbuffer_write(in_buffer, &v, 1);
+    //    jack_ringbuffer_write(size_buffer, (char *)&midi_data_len,
+    //                          sizeof(midi_data_len));
   }
+
+  DEBUG("Jack received MIDI: {}");
 }
 
 int jack::process_callback(jack_nframes_t nframes, void *arg) {
-//  auto instance = *(jack *)arg;
   auto instance = static_cast<jack *>(arg);
-//  DEBUG("Callback called with instance {}", jack_get_client_name(instance->client));
-  jack_midi_event_t ev;
-//  jack_time_t time;
+  //  jack_midi_event_t ev;
+  //  jack_time_t time;
 
-  for (const auto& p: instance->ports) {
-    auto io_port = p.second;
-    auto buffer = jack_port_get_buffer(io_port.in_port, nframes);
-    jack_nframes_t event_count = jack_midi_get_event_count(buffer);
-    if (event_count > 0) {
-      for (uint32_t e = 0; e < event_count; e++) {
-        DEBUG("Jack MIDI event received. port: {}", io_port.name);
-        jack_midi_event_get(&ev, buffer, e);
-        // Uncomment if received MIDI events are making any sense!
-        auto me = instance->midi_event.find(p.first);
-        if (me != instance->midi_event.end())
-          me->second(&ev);
+  for (const auto &p : instance->data.ports) {
+    //    void *in_port_buffer = jack_port_get_buffer(p.second.in_port,
+    //    nframes); jack_midi_clear_buffer(in_port_buffer);
+    while (jack_ringbuffer_read_space(p.second.in_buffer) > 0) {
+      //      DEBUG("Jack: Writing MIDI data to {}", p.second.name);
+//      int space{};
+//      jack_ringbuffer_read(p.second.in_buffer, (char *)&space, sizeof(char));
+      auto midiData = jack_midi_event_reserve(p.second.in_buffer, 0, 1);
+      jack_ringbuffer_read(p.second.in_buffer, (char *)midiData, 1);
+//      jack_ringbuffer_read_advance(p.second.in_buffer, 1);
+//      DEBUG("Processing ringbuffer data {:02x}", space);
 
-      }
-    }
-
-    void* out_port_buffer = jack_port_get_buffer(io_port.out_port, nframes);
-    jack_midi_clear_buffer(out_port_buffer);
-
-    while (jack_ringbuffer_read_space(instance->size_buffer) > 0)
-    {
-      DEBUG("Jack: Writing MIDI data to {}", io_port.name);
-      int space{};
-      jack_ringbuffer_read(instance->size_buffer, (char*)&space, sizeof(int));
-      auto midiData = jack_midi_event_reserve(out_port_buffer, 0, space);
-
-      jack_ringbuffer_read(instance->out_buffer, (char*)midiData, space);
     }
   }
+  /*
+   */
+
+  // process MIDI input from rtpmidi
+  /*
+    for (const auto &p : instance->ports) {
+      auto io_port = p.second;
+      auto buffer = jack_port_get_buffer(io_port.in_port, nframes);
+      jack_nframes_t event_count = jack_midi_get_event_count(buffer);
+      if (event_count > 0) {
+        for (uint32_t e = 0; e < event_count; e++) {
+          DEBUG("Jack MIDI event received. port: {}",
+                jack_port_short_name(instance->ports[p.first].in_port));
+          jack_midi_event_get(&ev, buffer, e);
+          // Uncomment if received MIDI events are making any sense!
+          // auto me = instance->midi_event.find(p.first);
+          // if (me != instance->midi_event.end())
+          // me->second(&ev);
+        }
+      }
+    }
+  */
+
   return 0;
+}
+
+signal_t<jack::port_t, const std::string &> &
+jack::get_subscribe_event(const std::string &index) {
+  return data.subscribe_event[index];
+}
+
+signal_t<jack::port_t> &jack::get_unsubscribe_event(const std::string &index) {
+  return data.unsubscribe_event[index];
+}
+
+signal_t<jack_midi_event_t *> &jack::get_midi_event(const std::string &index) {
+  return data.midi_event[index];
 }
 } // namespace rtpmidid

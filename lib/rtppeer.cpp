@@ -290,7 +290,7 @@ void rtppeer::parse_command_ck(io_bytes_reader &buffer, port_e port) {
     count = 2;
     latency = ck3 - ck1;
     waiting_ck = false;
-    INFO("Latency {}: {:.2f} ms (client / 2)", remote_name, latency / 10.0);
+//    INFO("Latency {}: {:.2f} ms (client / 2)", remote_name, latency / 10.0);
     ck_event(latency / 10.0);
   } break;
   case 2: {
@@ -298,7 +298,7 @@ void rtppeer::parse_command_ck(io_bytes_reader &buffer, port_e port) {
     ck2 = buffer.read_uint64();
     // ck3 = buffer.read_uint64();
     latency = get_timestamp() - ck2;
-    INFO("Latency {}: {:.2f} ms (server / 3)", remote_name, latency / 10.0);
+//    INFO("Latency {}: {:.2f} ms (server / 3)", remote_name, latency / 10.0);
     // No need to send message
     ck_event(latency / 10.0);
     return;

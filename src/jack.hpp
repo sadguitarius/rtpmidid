@@ -39,16 +39,24 @@ public:
 //    }
   };
 
-  struct io_port_t {
-    std::string name{};
+  struct port_data_t {
     jack_port_t *in_port{};
     jack_port_t *out_port{};
+    std::string name{};
+    jack_ringbuffer_t *size_buffer{};
+    jack_ringbuffer_t *in_buffer{};
   };
 
-  std::string name;
-  std::map<std::string, signal_t<port_t, const std::string &>> subscribe_event;
-  std::map<std::string, signal_t<port_t>> unsubscribe_event;
-  std::map<std::string, signal_t<jack_midi_event_t *>> midi_event;
+  struct client_data_t {
+    jack_client_t *client;
+    std::string client_name;
+    static const constexpr auto ringbuffer_size = 16384;
+    std::map<std::string, port_data_t> ports;
+    std::map<std::string, signal_t<port_t, const std::string &>> subscribe_event;
+    std::map<std::string, signal_t<port_t>> unsubscribe_event;
+    std::map<std::string, signal_t<jack_midi_event_t *>> midi_event;
+  };
+
 
   explicit jack(std::string name);
   ~jack();
@@ -59,14 +67,17 @@ public:
   // Disconnects everything from this port
   void disconnect_port(std::string &port);
 
-  void send_midi(const std::string &port_name, io_bytes_reader buffer);
+//  std::map<std::string, signal_t<port_t, const std::string &>> *subscribe_event;
+//  std::map<std::string, signal_t<port_t>> *unsubscribe_event;
+//  std::map<std::string, signal_t<jack_midi_event_t *>> *midi_event;
+  signal_t<port_t, const std::string &>& get_subscribe_event(const std::string &index);
+  signal_t<port_t>& get_unsubscribe_event(const std::string &index);
+  signal_t<jack_midi_event_t *>& get_midi_event(const std::string &index);
+
+  void midi_to_jack(const std::string &port_name, io_bytes_reader &midi_data);
 private:
-  static const constexpr auto ringbuffer_size = 16384;
-  jack_client_t *client;
-  std::map<std::string, io_port_t> ports;
+  client_data_t data;
   static int process_callback(jack_nframes_t nframes, void *arg);
-  jack_ringbuffer_t *out_buffer{};
-  jack_ringbuffer_t *size_buffer{};
 };
 
 } // namespace rtpmidid

@@ -125,6 +125,7 @@ void aseq::read_ready() {
       client = addr->client;
       port = addr->port;
       auto myport = ev->dest.port;
+      INFO("myport: {}", myport);
       INFO("New ALSA connection from port {} ({}:{})", name, client, port);
 
       subscribe_event[myport](port_t(client, port), name);
