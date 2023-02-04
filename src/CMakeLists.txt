@@ -1,6 +1,6 @@
 add_executable(
   rtpmidid-daemon  
-  aseq.cpp stringpp.cpp
+  midi_backend.cpp stringpp.cpp
   main.cpp config.cpp rtpmidid.cpp
   control_socket.cpp
 )
@@ -13,9 +13,15 @@ target_link_libraries(rtpmidid-daemon ${FMT_LIBRARIES})
 target_include_directories(rtpmidid-daemon PUBLIC ${FMT_INCLUDE_DIRS})
 target_compile_options(rtpmidid-daemon PUBLIC ${FMT_CFLAGS_OTHER})
 
-target_link_libraries(rtpmidid-daemon ${ALSA_LIBRARIES})
-target_include_directories(rtpmidid-daemon PUBLIC ${ALSA_INCLUDE_DIRS})
-target_compile_options(rtpmidid-daemon PUBLIC ${ALSA_CFLAGS_OTHER})
+target_link_libraries(rtpmidid-daemon ${JACK_LIBRARIES})
+target_include_directories(rtpmidid-daemon PUBLIC ${JACK_INCLUDE_DIRS})
+target_compile_options(rtpmidid-daemon PUBLIC ${JACK_CFLAGS_OTHER})
+
+#target_link_libraries(rtpmidid-daemon ${ALSA_LIBRARIES})
+#target_include_directories(rtpmidid-daemon PUBLIC ${ALSA_INCLUDE_DIRS})
+#target_compile_options(rtpmidid-daemon PUBLIC ${ALSA_CFLAGS_OTHER})
+
+target_link_libraries(rtpmidid-daemon libremidi)
 
 target_link_libraries(rtpmidid-daemon rtpmidid-static)
 

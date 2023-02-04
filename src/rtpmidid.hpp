@@ -18,14 +18,14 @@
 
 #pragma once
 
-#include "./aseq.hpp"
+#include "./midi_backend.hpp"
+#include <libremidi/libremidi.hpp>
 #include <memory>
 #include <optional>
 #include <rtpmidid/mdns_rtpmidi.hpp>
 #include <rtpmidid/poller.hpp>
 #include <set>
 #include <string>
-#include <optional>
 
 namespace rtpmidid {
 struct config_t;
@@ -46,7 +46,6 @@ struct client_info {
   uint16_t use_count;
   // This might be not intialized if not really connected yet.
   std::shared_ptr<::rtpmidid::rtpclient> peer;
-  uint8_t aseq_port;
   uint connect_attempts = 0;
 };
 struct server_conn_info {
@@ -58,38 +57,40 @@ struct server_conn_info {
 
 class rtpmidid_t {
 public:
-  std::string name;
-  ::rtpmidid::aseq seq;
+  std::string server_name;
+  ::rtpmidid::midi_backend backend;
   ::rtpmidid::mdns_rtpmidi mdns_rtpmidi;
   // Local port id to client_info for connections
-  std::map<uint8_t, client_info> known_clients;
-  std::map<uint8_t, server_conn_info> known_servers_connections;
+  std::map<std::string, client_info> known_clients;
+  std::map<std::string, server_conn_info> known_servers_connections;
   std::vector<std::shared_ptr<::rtpmidid::rtpserver>> servers;
-  std::map<aseq::port_t, std::shared_ptr<::rtpmidid::rtpserver>> alsa_to_server;
+  std::map<midi_backend::port_t, std::shared_ptr<::rtpmidid::rtpserver>>
+      alsa_to_server;
   std::set<std::string> known_mdns_peers;
 
   rtpmidid_t(const config_t &config);
 
   // Manual connect to a server.
-  std::optional<uint8_t> add_rtpmidi_client(const std::string &hostdescription);
-  std::optional<uint8_t> add_rtpmidi_client(const std::string &name,
-                                            const std::string &address,
-                                            const std::string &port);
+  std::optional<std::string>
+  add_rtpmidi_client(const std::string &hostdescription);
+  std::optional<std::string> add_rtpmidi_client(const std::string &name,
+                                                const std::string &address,
+                                                const std::string &port);
   void remove_rtpmidi_client(const std::string &name);
 
-  void recv_rtpmidi_event(int port, io_bytes_reader &midi_data);
-  void recv_alsamidi_event(int port, snd_seq_event_t *ev);
+  void recv_rtpmidi_event(const std::string &port, io_bytes_reader &midi_data);
+  void recv_backend_event(const std::string &port,
+                          const libremidi::message &ev);
 
-  void alsamidi_to_midiprotocol(snd_seq_event_t *ev, io_bytes_writer &buffer);
+  static void backend_midi_to_midiprotocol(const libremidi::message &ev,
+                                           io_bytes_writer &buffer);
 
-  void setup_alsa_seq();
+  void setup_midi_backend();
   void setup_mdns();
   void announce_rtpmidid_server(const std::string &name, uint16_t port);
   void unannounce_rtpmidid_server(const std::string &name, uint16_t port);
-  void connect_client(const std::string &name, int aseqport);
-  void disconnect_client(int aseqport,
-                         //  disconnect_reason_e ellidded
-                         int reason);
+  void connect_client(const std::string &name, const std::string &port);
+  void disconnect_client(const std::string &port, int reason);
   // An import server is one that for each discovered connection, creates
   // the alsa ports
   std::shared_ptr<rtpserver>
@@ -98,10 +99,11 @@ public:
   // An export server is one that exports a local ALSA seq port. It is announced
   // with the aseq port name and so on. There is one per connection to the
   // "Network"
-  std::shared_ptr<rtpserver> add_rtpmidid_export_server(const std::string &name,
-                                                        uint8_t alsaport,
-                                                        aseq::port_t &from);
+  std::shared_ptr<rtpserver>
+  add_rtpmidid_export_server(const std::string &name,
+                             const std::string &backend_port,
+                             midi_backend::port_t &from);
 
-  void remove_client(uint8_t alsa_port);
+  void remove_client(const std::string &alsa_port);
 };
 } // namespace rtpmidid

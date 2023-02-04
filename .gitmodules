@@ -1,0 +1,4 @@
+[submodule "third_party/libremidi"]
+	path = third_party/libremidi
+	url = git@github.com:sadguitarius/libremidi.git
+	branch = jack-duplicate-client-fix

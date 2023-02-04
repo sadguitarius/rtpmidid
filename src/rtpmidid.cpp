@@ -15,27 +15,26 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include <alsa/seq_event.h>
-#include <stdlib.h>
-#include <string>
-
-#include "./aseq.hpp"
-#include "./config.hpp"
+// #include <alsa/seq_event.h>
 #include "./rtpmidid.hpp"
+#include "./config.hpp"
 #include "./stringpp.hpp"
 #include "rtpmidid/exceptions.hpp"
+#include <libremidi/libremidi.hpp>
 #include <rtpmidid/iobytes.hpp>
 #include <rtpmidid/logger.hpp>
 #include <rtpmidid/rtpclient.hpp>
 #include <rtpmidid/rtpserver.hpp>
+#include <string>
 
 using namespace rtpmidid;
 using namespace std::chrono_literals;
 
 rtpmidid_t::rtpmidid_t(const config_t &config)
-    : name(config.name), seq(fmt::format("rtpmidi {}", name)) {
+    : server_name(config.name),
+      backend(fmt::format("rtpmidi {}", server_name)) {
   setup_mdns();
-  setup_alsa_seq();
+  setup_midi_backend();
 
   for (auto &port : config.ports) {
     auto server = add_rtpmidid_import_server(config.name, port);
@@ -50,7 +49,7 @@ rtpmidid_t::rtpmidid_t(const config_t &config)
   }
 }
 
-std::optional<uint8_t>
+std::optional<std::string>
 rtpmidid_t::add_rtpmidi_client(const std::string &connect_to) {
   INFO("Connecting to {}", connect_to);
   std::vector<std::string> s;
@@ -77,9 +76,9 @@ rtpmidid_t::add_rtpmidi_client(const std::string &connect_to) {
   if (s.size() == 1) {
     return add_rtpmidi_client(s[0], s[0], "5004");
   } else if (s.size() == 2) {
-    return add_rtpmidi_client(s[0], s[0], s[1].c_str());
+    return add_rtpmidi_client(s[0], s[0], s[1]);
   } else if (s.size() == 3) {
-    return add_rtpmidi_client(s[0], s[1], s[2].c_str());
+    return add_rtpmidi_client(s[0], s[1], s[2]);
   } else {
     ERROR("Invalid remote address. Format is host, name:host, or "
           "name:host:port. Host can be a hostname, ip4 address, or [ip6] "
@@ -108,7 +107,8 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
 
   auto wrtpserver = std::weak_ptr(rtpserver);
   rtpserver->connected_event.connect(
-      [this, wrtpserver, port](std::shared_ptr<::rtpmidid::rtppeer> peer) {
+      [this, wrtpserver,
+       port](const std::shared_ptr<::rtpmidid::rtppeer> &peer) {
         if (wrtpserver.expired()) {
           return;
         }
@@ -116,14 +116,16 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
 
         INFO("Remote client connects to local server at port {}. Name: {}",
              port, peer->remote_name);
-        auto aseq_port = seq.create_port(peer->remote_name);
+        backend.create_port(peer->remote_name);
 
-        peer->midi_event.connect([this, aseq_port](io_bytes_reader pb) {
-          this->recv_rtpmidi_event(aseq_port, pb);
+        peer->midi_event.connect([this, port](io_bytes_reader pb) {
+          this->recv_rtpmidi_event(port, pb);
         });
-        seq.midi_event[aseq_port].connect(
-            [this, aseq_port](snd_seq_event_t *ev) {
-              auto peer_it = known_servers_connections.find(aseq_port);
+        backend.midi_event[port].connect(
+            [this, port](const libremidi::message &ev) {
+              DEBUG("Got MIDI event from {}, type {:02x}", port,
+                    int(ev.get_message_type()));
+              auto peer_it = known_servers_connections.find(port);
               if (peer_it == std::end(known_servers_connections)) {
                 WARNING("Got MIDI event in an non existing anymore peer.");
                 return;
@@ -131,13 +133,13 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
               auto conn = &peer_it->second;
 
               io_bytes_writer_static<4096> stream;
-              alsamidi_to_midiprotocol(ev, stream);
+              backend_midi_to_midiprotocol(ev, stream);
               conn->peer->send_midi(stream);
             });
-        peer->disconnect_event.connect([this, aseq_port](auto reason) {
-          DEBUG("Remove aseq port {}", aseq_port);
-          seq.remove_port(aseq_port);
-          known_servers_connections.erase(aseq_port);
+        peer->disconnect_event.connect([this, port](auto reason) {
+          DEBUG("Remove aseq port {}", port);
+          backend.remove_port(port);
+          known_servers_connections.erase(port);
         });
 
         server_conn_info server_conn = {
@@ -146,7 +148,7 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
             rtpserver,
         };
 
-        known_servers_connections[aseq_port] = server_conn;
+        known_servers_connections[port] = server_conn;
       });
 
   return rtpserver;
@@ -154,7 +156,8 @@ rtpmidid_t::add_rtpmidid_import_server(const std::string &name,
 
 std::shared_ptr<rtpserver>
 rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
-                                       uint8_t alsaport, aseq::port_t &from) {
+                                       const std::string &backend_port,
+                                       midi_backend::port_t &from) {
 
   for (auto &alsa_server : alsa_to_server) {
     auto server = alsa_server.second;
@@ -170,22 +173,25 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
 
   announce_rtpmidid_server(name, server->control_port);
 
-  seq.midi_event[alsaport].connect([this, server](snd_seq_event_t *ev) {
-    io_bytes_writer_static<4096> buffer;
-    alsamidi_to_midiprotocol(ev, buffer);
-    server->send_midi_to_all_peers(buffer);
-  });
+  backend.midi_event[backend_port].connect(
+      [server](const libremidi::message &ev) {
+        DEBUG("Got MIDI event from server, type {:02x}",
+              int(ev.get_message_type()));
+        io_bytes_writer_static<4096> buffer;
+        backend_midi_to_midiprotocol(ev, buffer);
+        server->send_midi_to_all_peers(buffer);
+      });
 
-  seq.unsubscribe_event[alsaport].connect(
-      [this, name, server](aseq::port_t from) {
+  backend.unsubscribe_event[backend_port].connect(
+      [this, name, server](const midi_backend::port_t &from) {
         // This should destroy the server.
         unannounce_rtpmidid_server(name, server->control_port);
         // TODO: disconnect from on_midi_event.
         alsa_to_server.erase(from);
       });
 
-  server->midi_event.connect([this, alsaport](io_bytes_reader buffer) {
-    this->recv_rtpmidi_event(alsaport, buffer);
+  server->midi_event.connect([this, backend_port](io_bytes_reader buffer) {
+    this->recv_rtpmidi_event(backend_port, buffer);
   });
 
   alsa_to_server[from] = server;
@@ -193,18 +199,18 @@ rtpmidid_t::add_rtpmidid_export_server(const std::string &name,
   return server;
 }
 
-void rtpmidid_t::setup_alsa_seq() {
+void rtpmidid_t::setup_midi_backend() {
   // Export only one, but all data that is connected to it.
   // add_export_port();
-  auto alsaport = seq.create_port("Network");
-  seq.subscribe_event[alsaport].connect(
-      [this, alsaport](aseq::port_t from, const std::string &name) {
+  backend.create_port("Network");
+  backend.subscribe_event[std::string("Network")].connect(
+      [this](midi_backend::port_t from, const std::string &name) {
         DEBUG("Connected to ALSA port {}:{}. Create network server for this "
               "alsa data.",
               from.client, from.port);
 
-        add_rtpmidid_export_server(fmt::format("{}/{}", this->name, name),
-                                   alsaport, from);
+        add_rtpmidid_export_server(fmt::format("{}/{}", server_name, name),
+                                   "Network", from);
       });
 }
 
@@ -231,7 +237,7 @@ void rtpmidid_t::setup_mdns() {
  * And when disconnected, will disconnect real connection if it's last connected
  * endpoint.
  */
-std::optional<uint8_t>
+std::optional<std::string>
 rtpmidid_t::add_rtpmidi_client(const std::string &name,
                                const std::string &address,
                                const std::string &net_port) {
@@ -247,23 +253,23 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
     }
   }
 
-  uint8_t aseq_port = seq.create_port(name);
+  backend.create_port(name);
   auto peer_info = ::rtpmidid::client_info{
-      name, {{address, net_port}}, 0, 0, nullptr, aseq_port,
+      name, {{address, net_port}}, 0, 0, nullptr,
   };
 
-  INFO("New alsa port: {}, connects to host: {}, port: {}, name: {}", aseq_port,
-       address, net_port, name);
-  known_clients[aseq_port] = std::move(peer_info);
+  INFO("New MIDI port connects to host: {}, port: {}, name: {}", address,
+       net_port, name);
+  known_clients[name] = std::move(peer_info);
 
-  seq.subscribe_event[aseq_port].connect(
-      [this, aseq_port](aseq::port_t port, const std::string &name) {
-        // DEBUG("Callback on subscribe at rtpmidid: {}", name);
-        connect_client(fmt::format("{}/{}", this->name, name), aseq_port);
+  backend.subscribe_event[name].connect(
+      [this](const midi_backend::port_t &port, const std::string &name) {
+        DEBUG("Callback on subscribe at rtpmidid: {}", name);
+        connect_client(fmt::format("{}/{}", this->server_name, name), name);
       });
-  seq.unsubscribe_event[aseq_port].connect(
-      [this, aseq_port](aseq::port_t port) {
-        auto peer_info = &known_clients[aseq_port];
+  backend.unsubscribe_event[name].connect(
+      [this, name](const midi_backend::port_t &port) {
+        auto peer_info = &known_clients[name];
         if (peer_info->use_count > 0)
           peer_info->use_count--;
 
@@ -274,20 +280,19 @@ rtpmidid_t::add_rtpmidi_client(const std::string &name,
           peer_info->peer = nullptr;
         }
       });
-  seq.midi_event[aseq_port].connect([this, aseq_port](snd_seq_event_t *ev) {
-    this->recv_alsamidi_event(aseq_port, ev);
+  backend.midi_event[name].connect([this, name](const libremidi::message &ev) {
+    this->recv_backend_event(name, ev);
   });
 
-  return aseq_port;
+  return name;
 }
 
 void rtpmidid_t::remove_rtpmidi_client(const std::string &name) {
   INFO("Removing rtp midi client {}", name);
 
-  for (auto I = known_clients.begin(), endI = known_clients.end(); I != endI;
-       ++I) {
-    if ((*I).second.name == name) {
-      auto &known = *I;
+  for (auto &known_client : known_clients) {
+    if (known_client.second.name == name) {
+      auto &known = known_client;
       DEBUG("Found client to delete: alsa port {}. Deletes all known addreses.",
             known.first);
       remove_client(known.first);
@@ -297,8 +302,9 @@ void rtpmidid_t::remove_rtpmidi_client(const std::string &name) {
   // WARNING("Service is not currently known to delete: {}", name);
 }
 
-void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
-  auto peer_info = &known_clients[aseq_port];
+void rtpmidid_t::connect_client(const std::string &name,
+                                const std::string &port) {
+  auto peer_info = &known_clients[port];
   if (peer_info->peer) {
     if (peer_info->peer->peer.status == rtppeer::CONNECTED) {
       peer_info->use_count++;
@@ -310,13 +316,12 @@ void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
   } else {
     auto &address = peer_info->addresses[peer_info->addr_idx];
     peer_info->peer = std::make_shared<rtpclient>(name);
-    peer_info->peer->peer.midi_event.connect(
-        [this, aseq_port](io_bytes_reader pb) {
-          this->recv_rtpmidi_event(aseq_port, pb);
-        });
+    peer_info->peer->peer.midi_event.connect([this, port](io_bytes_reader pb) {
+      this->recv_rtpmidi_event(port, pb);
+    });
     peer_info->peer->peer.disconnect_event.connect(
-        [this, aseq_port](rtppeer::disconnect_reason_e reason) {
-          this->disconnect_client(aseq_port, reason);
+        [this, port](rtppeer::disconnect_reason_e reason) {
+          this->disconnect_client(port, reason);
         });
     peer_info->use_count++;
     DEBUG("Subscribed another local client to peer {} at rtpmidid (users {})",
@@ -326,7 +331,7 @@ void rtpmidid_t::connect_client(const std::string &name, int aseq_port) {
   }
 }
 
-void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
+void rtpmidid_t::disconnect_client(const std::string &port, int reasoni) {
   constexpr const char *failure_reasons[] = {"",
                                              "can't connect",
                                              "peer disconnected",
@@ -335,10 +340,10 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
                                              "connection timeout",
                                              "CK timeout"};
 
-  auto peer_info = &known_clients[aseq_port];
+  auto peer_info = &known_clients[port];
   auto reason = static_cast<rtppeer::disconnect_reason_e>(reasoni);
 
-  DEBUG("Disconnect aseq port {}, signal: {}({})", aseq_port,
+  DEBUG("Disconnect backend port {}, signal: {}({})", port,
         failure_reasons[reason], reason);
   // If cant connec t(network problem) or rejected, try again in next
   // address.
@@ -349,7 +354,7 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
       ERROR("Too many attempts to connect. Not trying again. Attempted "
             "{} times.",
             peer_info->connect_attempts);
-      remove_client(peer_info->aseq_port);
+      remove_client(peer_info->name);
       return;
     }
 
@@ -372,18 +377,17 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
                                                                : "setup");
     // remove_client(peer_info->aseq_port);
     return;
-    break;
 
   case rtppeer::disconnect_reason_e::PEER_DISCONNECTED:
-    seq.disconnect_port(peer_info->aseq_port);
+    backend.disconnect_port(peer_info->name);
     if (peer_info->use_count > 0)
       peer_info->use_count--;
     WARNING("Peer disconnected {}. Aseq disconnect. ({} users)",
             peer_info->name, peer_info->use_count);
     // Delete it, but later as we are here because of a call inside the peer
     if (peer_info->use_count == 0) {
-      poller.call_later([this, aseq_port] {
-        auto peer_info = &known_clients[aseq_port];
+      poller.call_later([this, port] {
+        auto peer_info = &known_clients[port];
         if (peer_info)
           peer_info->peer = nullptr;
       });
@@ -399,13 +403,14 @@ void rtpmidid_t::disconnect_client(int aseq_port, int reasoni) {
 
   default:
     ERROR("Other reason: {}", reason);
-    remove_client(peer_info->aseq_port);
+    remove_client(peer_info->name);
   }
 }
 
-void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
+void rtpmidid_t::recv_rtpmidi_event(const std::string &port,
+                                    io_bytes_reader &midi_data) {
   uint8_t current_command = 0;
-  snd_seq_event_t ev;
+  libremidi::message ev;
 
   while (midi_data.position < midi_data.end) {
     // MIDI may reuse the last command if appropiate. For example several
@@ -420,34 +425,37 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
 
     switch (type) {
     case 0xB0: // CC
-      snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_controller(&ev, current_command & 0x0F,
-                                midi_data.read_uint8(), midi_data.read_uint8());
+      ev = libremidi::message::control_change(current_command & 0x0F,
+                                              midi_data.read_uint8(),
+                                              midi_data.read_uint8());
       break;
     case 0x90:
       snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_noteon(&ev, current_command & 0x0F, midi_data.read_uint8(),
-                            midi_data.read_uint8());
+      ev = libremidi::message::note_on(current_command & 0x0F,
+                                       midi_data.read_uint8(),
+                                       midi_data.read_uint8());
       break;
     case 0x80:
       snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_noteoff(&ev, current_command & 0x0F,
-                             midi_data.read_uint8(), midi_data.read_uint8());
+      ev = libremidi::message::note_off(current_command & 0x0F,
+                                        midi_data.read_uint8(),
+                                        midi_data.read_uint8());
       break;
     case 0xA0:
       snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_keypress(&ev, current_command & 0x0F,
-                              midi_data.read_uint8(), midi_data.read_uint8());
+      ev = libremidi::message::poly_pressure(current_command & 0x0F,
+                                             midi_data.read_uint8(),
+                                             midi_data.read_uint8());
       break;
     case 0xC0:
       snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_pgmchange(&ev, current_command & 0x0F,
-                               midi_data.read_uint8());
+      ev = libremidi::message::program_change(current_command & 0x0F,
+                                              midi_data.read_uint8());
       break;
     case 0xD0:
       snd_seq_ev_clear(&ev);
-      snd_seq_ev_set_chanpress(&ev, current_command & 0x0F,
-                               midi_data.read_uint8());
+      ev = libremidi::message::aftertouch(current_command & 0x0F,
+                                          midi_data.read_uint8());
       break;
     case 0xE0: {
       snd_seq_ev_clear(&ev);
@@ -455,7 +463,7 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
       auto msb = midi_data.read_uint8();
       auto pitch_bend = ((msb << 7) + lsb) - 8192;
       // DEBUG("Pitch bend received {}", pitch_bend);
-      snd_seq_ev_set_pitchbend(&ev, current_command & 0x0F, pitch_bend);
+      ev = libremidi::message::pitch_bend(current_command & 0x0F, pitch_bend);
     } break;
     case 0xF0: {
       // System messages
@@ -463,67 +471,60 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
       case 0xF0: { // SysEx event
         auto start = midi_data.pos() - 1;
         auto len = 2;
+        libremidi::midi_bytes sysex_message;
+        sysex_message.push_back(0xF0);
         try {
-          while (midi_data.read_uint8() != 0xf7)
+          while (auto i = midi_data.read_uint8() != 0xf7) {
+            sysex_message.push_back(i);
             len++;
+          }
         } catch (exception &e) {
           WARNING("Malformed SysEx message in buffer has no end byte");
           break;
         }
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_sysex(&ev, len, &midi_data.start[start]);
+        sysex_message.push_back(0xF7);
+        // TODO: not sure how this works
+        //        snd_seq_ev_set_sysex(&ev, len, &midi_data.start[start]);
+        ev.clear();
+        ev.bytes = sysex_message;
+        //        ev.assign(len, &midi_data.start[start]);
       } break;
       case 0xF1: // MTC Quarter Frame package
         snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.data.control.value = midi_data.read_uint8();
-        ev.type = SND_SEQ_EVENT_QFRAME;
+        ev.bytes = {uint8_t(libremidi::message_type::TIME_CODE),
+                    midi_data.read_uint8()};
         break;
       case 0xF3: // Song select
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.data.control.value = midi_data.read_uint8();
-        ev.type = SND_SEQ_EVENT_SONGSEL;
+        ev.bytes = {uint8_t(libremidi::message_type::SONG_SELECT),
+                    midi_data.read_uint8()};
         break;
       case 0xFE: // Active sense
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_SENSING;
+        ev.bytes = {uint8_t(libremidi::message_type::ACTIVE_SENSING)};
         break;
       case 0xF6: // Tune request
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_TUNE_REQUEST;
+        ev.bytes = {uint8_t(libremidi::message_type::TUNE_REQUEST)};
         break;
       case 0xF8: // Clock
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_CLOCK;
+        ev.bytes = {uint8_t(libremidi::message_type::TIME_CLOCK)};
         break;
-      case 0xF9: // Tick
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_TICK;
-        break;
+        /*
+              case 0xF9: // Tick
+                snd_seq_ev_clear(&ev);
+                snd_seq_ev_set_fixed(&ev);
+                ev.type = SND_SEQ_EVENT_TICK;
+                break;
+        */
       case 0xFF: // Clock
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_RESET;
+        ev.bytes = {uint8_t(libremidi::message_type::SYSTEM_RESET)};
         break;
       case 0xFA: // start
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_START;
+        ev.bytes = {uint8_t(libremidi::message_type::START)};
         break;
       case 0xFC: // stop
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_STOP;
+        ev.bytes = {uint8_t(libremidi::message_type::STOP)};
         break;
       case 0xFB: // continue
-        snd_seq_ev_clear(&ev);
-        snd_seq_ev_set_fixed(&ev);
-        ev.type = SND_SEQ_EVENT_CONTINUE;
+        ev.bytes = {uint8_t(libremidi::message_type::CONTINUE)};
         break;
       default:
         break;
@@ -534,10 +535,7 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
       return;
       break;
     }
-    snd_seq_ev_set_source(&ev, port);
-    snd_seq_ev_set_subs(&ev);
-    snd_seq_ev_set_direct(&ev);
-    snd_seq_event_output_direct(seq.seq, &ev);
+    backend.send_midi(port, &ev[0], ev.size());
     // There is one delta time byte following, if there are multiple commands in
     // one frame. We ignore this
     if (midi_data.position < midi_data.end)
@@ -546,98 +544,107 @@ void rtpmidid_t::recv_rtpmidi_event(int port, io_bytes_reader &midi_data) {
   }
 }
 
-void rtpmidid_t::recv_alsamidi_event(int aseq_port, snd_seq_event *ev) {
-  // DEBUG("Callback on midi event at rtpmidid, port {}", aseq_port);
-  auto peer_info = &known_clients[aseq_port];
+void rtpmidid_t::recv_backend_event(const std::string &port,
+                                    const libremidi::message &ev) {
+  DEBUG("Callback on midi event at rtpmidid, port {}", port);
+  auto peer_info = &known_clients[port];
   if (!peer_info->peer) {
     ERROR("There is no peer but I received an event! This situation should "
           "NEVER happen. File a bug. Port {}",
-          aseq_port);
+          port);
     return;
   }
 
   io_bytes_writer_static<4096> stream;
-  alsamidi_to_midiprotocol(ev, stream);
+  backend_midi_to_midiprotocol(ev, stream);
   peer_info->peer->peer.send_midi(stream);
 }
 
-void rtpmidid_t::alsamidi_to_midiprotocol(snd_seq_event_t *ev,
-                                          io_bytes_writer &stream) {
-  switch (ev->type) {
-  // case SND_SEQ_EVENT_NOTE:
-  case SND_SEQ_EVENT_NOTEON:
-    stream.write_uint8(0x90 | (ev->data.note.channel & 0x0F));
-    stream.write_uint8(ev->data.note.note);
-    stream.write_uint8(ev->data.note.velocity);
+void rtpmidid_t::backend_midi_to_midiprotocol(const libremidi::message &ev,
+                                              io_bytes_writer &stream) {
+  std::string message_type{};
+  switch (ev.get_message_type()) {
+  case libremidi::message_type::NOTE_ON:
+    stream.write_uint8(0x90 | (ev.get_channel() & 0x0F));
+    stream.write_uint8(ev.bytes[0]);
+    stream.write_uint8(ev.bytes[1]);
+    message_type = "note on";
     break;
-  case SND_SEQ_EVENT_NOTEOFF:
-    stream.write_uint8(0x80 | (ev->data.note.channel & 0x0F));
-    stream.write_uint8(ev->data.note.note);
-    stream.write_uint8(ev->data.note.velocity);
+  case libremidi::message_type::NOTE_OFF:
+    stream.write_uint8(0x80 | (ev.get_channel() & 0x0F));
+    stream.write_uint8(ev.bytes[0]);
+    stream.write_uint8(ev.bytes[1]);
+    message_type = "note off";
     break;
-  case SND_SEQ_EVENT_KEYPRESS:
-    stream.write_uint8(0xA0 | (ev->data.note.channel & 0x0F));
-    stream.write_uint8(ev->data.note.note);
-    stream.write_uint8(ev->data.note.velocity);
+  case libremidi::message_type::POLY_PRESSURE:
+    stream.write_uint8(0xA0 | (ev.get_channel() & 0x0F));
+    stream.write_uint8(ev.bytes[0]);
+    stream.write_uint8(ev.bytes[1]);
     break;
-  case SND_SEQ_EVENT_CONTROLLER:
-    stream.write_uint8(0xB0 | (ev->data.control.channel & 0x0F));
-    stream.write_uint8(ev->data.control.param);
-    stream.write_uint8(ev->data.control.value);
+  case libremidi::message_type::CONTROL_CHANGE:
+    stream.write_uint8(0xB0 | (ev.get_channel() & 0x0F));
+    stream.write_uint8(ev.bytes[0]);
+    stream.write_uint8(ev.bytes[1]);
+    message_type = "control change";
     break;
-  case SND_SEQ_EVENT_PGMCHANGE:
-    stream.write_uint8(0xC0 | (ev->data.control.channel));
-    stream.write_uint8(ev->data.control.value & 0x0FF);
+  case libremidi::message_type::PROGRAM_CHANGE:
+    stream.write_uint8(0xC0 | (ev.get_channel()));
+    stream.write_uint8(ev.bytes[0] & 0x0FF);
+    message_type = "program change";
     break;
-  case SND_SEQ_EVENT_CHANPRESS:
-    stream.write_uint8(0xD0 | (ev->data.control.channel));
-    stream.write_uint8(ev->data.control.value & 0x0FF);
+  case libremidi::message_type::AFTERTOUCH:
+    stream.write_uint8(0xD0 | (ev.get_channel()));
+    stream.write_uint8(ev.bytes[0] & 0x0FF);
+    message_type = "aftertouch";
     break;
-  case SND_SEQ_EVENT_PITCHBEND:
-    // DEBUG("Send pitch bend {}", ev->data.control.value);
-    stream.write_uint8(0xE0 | (ev->data.control.channel & 0x0F));
-    stream.write_uint8((ev->data.control.value + 8192) & 0x07F);
-    stream.write_uint8((ev->data.control.value + 8192) >> 7 & 0x07F);
+  case libremidi::message_type::PITCH_BEND:
+    stream.write_uint8(0xE0 | (ev.get_channel() & 0x0F));
+    stream.write_uint8((ev.bytes[0] + 8192) & 0x07F);
+    stream.write_uint8((ev.bytes[0] + 8192) >> 7 & 0x07F);
+    message_type = "pitch bend";
     break;
-  case SND_SEQ_EVENT_SENSING:
+  case libremidi::message_type::ACTIVE_SENSING:
     stream.write_uint8(0xFE);
+    message_type = "active sensing";
     break;
-  case SND_SEQ_EVENT_STOP:
+  case libremidi::message_type::STOP:
     stream.write_uint8(0xFC);
+    message_type = "stop";
     break;
-  case SND_SEQ_EVENT_CLOCK:
+  case libremidi::message_type::TIME_CLOCK:
     stream.write_uint8(0xF8);
+    message_type = "clock";
     break;
-  case SND_SEQ_EVENT_START:
+  case libremidi::message_type::START:
     stream.write_uint8(0xFA);
+    message_type = "start";
     break;
-  case SND_SEQ_EVENT_CONTINUE:
+  case libremidi::message_type::CONTINUE:
     stream.write_uint8(0xFB);
+    message_type = "stop";
     break;
-  case SND_SEQ_EVENT_QFRAME:
+  case libremidi::message_type::TIME_CODE:
     stream.write_uint8(0xF1);
-    stream.write_uint8(ev->data.control.value & 0x0FF);
+    stream.write_uint8(ev.bytes[0] & 0x0FF);
     break;
-  case SND_SEQ_EVENT_SYSEX: {
-    ssize_t len = ev->data.ext.len, sz = stream.size();
-    if (len <= sz) {
-      uint8_t *data = (unsigned char *)ev->data.ext.ptr;
-      for (ssize_t i = 0; i < len; i++) {
-        stream.write_uint8(data[i]);
+  case libremidi::message_type::SYSTEM_EXCLUSIVE:
+    if (ev.size() <= stream.size()) {
+      for (auto i : ev.bytes) {
+        stream.write_uint8(i);
       }
     } else {
-      WARNING("Sysex buffer overflow! Not sending. ({} bytes needed)", len);
+      WARNING("Sysex buffer overflow! Not sending. ({} bytes needed)",
+              ev.size());
     }
-  } break;
-  default:
-    WARNING("Event type not yet implemented! Not sending. {}", ev->type);
-    return;
     break;
+  default:
+    WARNING("Event type not yet implemented! Not sending. {}", message_type);
+    return;
   }
 }
 
-void rtpmidid_t::remove_client(uint8_t port) {
-  // We add it to the poller queue as as GC, as the peer
+void rtpmidid_t::remove_client(const std::string &port) {
+  // We add it to the poller queue as GC, as the peer
   // might be further used at this call point.
   poller.call_later([this, port] {
     if (known_clients.find(port) == known_clients.end()) {
@@ -646,10 +653,10 @@ void rtpmidid_t::remove_client(uint8_t port) {
       return;
     }
     DEBUG("Removing peer from known peers list. Port {}", port);
-    seq.remove_port(port);
-    seq.subscribe_event[port].disconnect_all();
-    seq.unsubscribe_event[port].disconnect_all();
-    seq.midi_event[port].disconnect_all();
+    backend.remove_port(port);
+    backend.subscribe_event[port].disconnect_all();
+    backend.unsubscribe_event[port].disconnect_all();
+    backend.midi_event[port].disconnect_all();
 
     // Last as may be used in the shutdown of the client.
     known_clients.erase(port);
