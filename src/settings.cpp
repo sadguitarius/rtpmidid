@@ -79,7 +79,7 @@ fmt::formatter<std::vector<rtpmididns::settings_t::connect_to_t>>::format(
 
 fmt::appender fmt::formatter<rtpmididns::settings_t>::format(
     const rtpmididns::settings_t &data, format_context &ctx) {
-#if FMT_VERSION > 90000
+/* #if FMT_VERSION > 90000
   return fmt::format_to(ctx.out(),
                         "[settings_t: alsa_name: {}, alsa_network: {}, "
                         "control_filename: {}, rtpmidi_announces: {}, "
@@ -89,9 +89,9 @@ fmt::appender fmt::formatter<rtpmididns::settings_t>::format(
                         data.control_filename, data.rtpmidi_announces,
                         data.alsa_announces, data.connect_to,
                         data.alsa_hw_auto_export);
-#else
+#else */
   return fmt::format_to(ctx.out(), "[settings_t]");
-#endif
+// #endif
 }
 
 fmt::appender
