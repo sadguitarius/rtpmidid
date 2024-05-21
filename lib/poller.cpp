@@ -20,6 +20,7 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <algorithm>
 
 #include <cassert>
 #include <map>
