@@ -79,6 +79,7 @@ fmt::formatter<std::vector<rtpmididns::settings_t::connect_to_t>>::format(
 
 fmt::appender fmt::formatter<rtpmididns::settings_t>::format(
     const rtpmididns::settings_t &data, format_context &ctx) {
+// TODO: fix this
 /* #if FMT_VERSION > 90000
   return fmt::format_to(ctx.out(),
                         "[settings_t: alsa_name: {}, alsa_network: {}, "
@@ -105,7 +106,8 @@ fmt::formatter<rtpmididns::settings_t::alsa_hw_auto_export_t>::format(
   if (data.name_negative_regex.has_value()) {
     result += fmt::format("name_negative_regex: {} ", data.name_negative);
   }
-  result += fmt::format("type: {} ", data.type);
+// TODO: fix this
+  // result += fmt::format("type: {} ", data.type);
   result += "]";
   return fmt::format_to(ctx.out(), "{}", result);
 }
