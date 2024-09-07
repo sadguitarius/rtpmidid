@@ -138,7 +138,7 @@ install-rtpmidid: build man
 	cp build/rtpmidid-cli $(DESTDIR)/$(PREFIX)/bin/rtpmidid-cli
 	mkdir -p $(DESTDIR)/etc/systemd/system/
 	cp debian/rtpmidid.service $(DESTDIR)/etc/systemd/system/
-	mkdir -p /etc/rtpmidid/
+	mkdir -p $(DESTDIR)/etc/rtpmidid/
 	cp default.ini $(DESTDIR)/etc/rtpmidid/
 	mkdir -p $(DESTDIR)/$(PREFIX)/share/doc/rtpmidid/
 	cp README.md $(DESTDIR)/$(PREFIX)/share/doc/rtpmidid/
