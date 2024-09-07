@@ -20,7 +20,7 @@ help:
 	@echo " clean     -- Cleans project"
 	@echo " deb       -- Generate deb package"
 	@echo " test      -- Runs all test"
-	@echo " install   -- Installs to PREFIX or DESTDIR (default /usr/local/)"
+	@echo " install   -- Installs to PREFIX (default /usr/local/)"
 	@echo " man       -- Generate man pages"
 	@echo
 	@echo " run-gdb  -- Run inside gdb, to capture backtrace of failures (bt). Useful for bug reports."
@@ -121,9 +121,9 @@ deb:
 
 	dpkg-buildpackage --no-sign
 
-ifneq ($(DESTDIR),)
-    PREFIX := $(DESTDIR)
-endif
+# ifneq ($(DESTDIR),)
+#     PREFIX := $(DESTDIR)
+# endif
 ifeq ($(PREFIX),)
     PREFIX := /usr/local
 endif
@@ -132,34 +132,34 @@ endif
 install: install-rtpmidid install-librtpmidid0 install-librtpmidid0-dev
 
 install-rtpmidid: build man
-	mkdir -p $(PREFIX)/bin/
-	cp build/src/rtpmidid $(PREFIX)/bin/
+	mkdir -p $(DESTDIR)/$(PREFIX)/bin/
+	cp build/src/rtpmidid $(DESTDIR)/$(PREFIX)/bin/
 	cd cli && make compile
-	cp build/rtpmidid-cli $(PREFIX)/bin/rtpmidid-cli
-	mkdir -p /etc/systemd/system/
-	cp debian/rtpmidid.service /etc/systemd/system/
+	cp build/rtpmidid-cli $(DESTDIR)/$(PREFIX)/bin/rtpmidid-cli
+	mkdir -p $(DESTDIR)/etc/systemd/system/
+	cp debian/rtpmidid.service $(DESTDIR)/etc/systemd/system/
 	mkdir -p /etc/rtpmidid/
-	cp default.ini /etc/rtpmidid/
-	mkdir -p $(PREFIX)/share/doc/rtpmidid/
-	cp README.md $(PREFIX)/share/doc/rtpmidid/
-	cp LICENSE-daemon.txt $(PREFIX)/share/doc/rtpmidid/LICENSE.txt
-	mkdir -p $(PREFIX)/share/man/man1/
-	cp build/man/rtpmidid.1 $(PREFIX)/share/man/man1/
-	cp build/man/rtpmidid-cli.1 $(PREFIX)/share/man/man1/
+	cp default.ini $(DESTDIR)/etc/rtpmidid/
+	mkdir -p $(DESTDIR)/$(PREFIX)/share/doc/rtpmidid/
+	cp README.md $(DESTDIR)/$(PREFIX)/share/doc/rtpmidid/
+	cp LICENSE-daemon.txt $(DESTDIR)/$(PREFIX)/share/doc/rtpmidid/LICENSE.txt
+	mkdir -p $(DESTDIR)/$(PREFIX)/share/man/man1/
+	cp build/man/rtpmidid.1 $(DESTDIR)/$(PREFIX)/share/man/man1/
+	cp build/man/rtpmidid-cli.1 $(DESTDIR)/$(PREFIX)/share/man/man1/
 
 install-librtpmidid0: build
-	mkdir -p $(PREFIX)/lib/
-	cp -a build/lib/lib*so* $(PREFIX)/lib/
-	mkdir -p $(PREFIX)/share/doc/librtpmidid0/
-	cp README.md $(PREFIX)/share/doc/librtpmidid0/
-	cp README.librtpmidid.md $(PREFIX)/share/doc/librtpmidid0/
-	cp LICENSE-lib.txt $(PREFIX)/share/doc/librtpmidid0/LICENSE.txt
+	mkdir -p $(DESTDIR)/$(PREFIX)/lib/
+	cp -a build/lib/lib*so* $(DESTDIR)/$(PREFIX)/lib/
+	mkdir -p $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0/
+	cp README.md $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0/
+	cp README.librtpmidid.md $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0/
+	cp LICENSE-lib.txt $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0/LICENSE.txt
 
 install-librtpmidid0-dev: build
-	mkdir -p $(PREFIX)/lib/ $(PREFIX)/include/
-	cp -a build/lib/lib*.a $(PREFIX)/lib/
-	cp -a include/rtpmidid $(PREFIX)/include/
-	mkdir -p $(PREFIX)/share/doc/librtpmidid0-dev/
-	cp README.md $(PREFIX)/share/doc/librtpmidid0-dev/
-	cp README.librtpmidid.md $(PREFIX)/share/doc/librtpmidid0-dev/
-	cp LICENSE-lib.txt $(PREFIX)/share/doc/librtpmidid0-dev/LICENSE.txt
+	mkdir -p $(DESTDIR)/$(PREFIX)/lib/ $(DESTDIR)/$(PREFIX)/include/
+	cp -a build/lib/lib*.a $(DESTDIR)/$(PREFIX)/lib/
+	cp -a include/rtpmidid $(DESTDIR)/$(PREFIX)/include/
+	mkdir -p $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0-dev/
+	cp README.md $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0-dev/
+	cp README.librtpmidid.md $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0-dev/
+	cp LICENSE-lib.txt $(DESTDIR)/$(PREFIX)/share/doc/librtpmidid0-dev/LICENSE.txt
