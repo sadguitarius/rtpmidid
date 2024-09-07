@@ -6,7 +6,7 @@ JOBS:=$(shell nproc)
 # To easy change to clang, set CXX.
 # ENABLE_PCH sound like a good idea, but for massive parallelist (my comp has 32 CPU threads), it
 # stalls the parallelist waiting to compile the Pre Compiled Headers.
-CMAKE_EXTRA_ARGS := -DCMAKE_CXX_COMPILER=${CXX} -DENABLE_PCH=OFF
+# CMAKE_EXTRA_ARGS := -DCMAKE_CXX_COMPILER=${CXX}
 
 
 .PHONY: help
@@ -136,10 +136,10 @@ install-rtpmidid: build man
 	cp build/src/rtpmidid $(PREFIX)/bin/
 	cd cli && make compile
 	cp build/rtpmidid-cli $(PREFIX)/bin/rtpmidid-cli
-	mkdir -p $(PREFIX)/etc/systemd/system/
-	cp debian/rtpmidid.service $(PREFIX)/etc/systemd/system/
-	mkdir -p $(PREFIX)/etc/rtpmidid/
-	cp default.ini $(PREFIX)/etc/rtpmidid/
+	mkdir -p /etc/systemd/system/
+	cp debian/rtpmidid.service /etc/systemd/system/
+	mkdir -p /etc/rtpmidid/
+	cp default.ini /etc/rtpmidid/
 	mkdir -p $(PREFIX)/share/doc/rtpmidid/
 	cp README.md $(PREFIX)/share/doc/rtpmidid/
 	cp LICENSE-daemon.txt $(PREFIX)/share/doc/rtpmidid/LICENSE.txt

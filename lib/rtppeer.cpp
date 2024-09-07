@@ -177,7 +177,7 @@ void rtppeer_t::parse_command_in(io_bytes_reader &buffer, port_e port) {
             "Might happen on some split brain situations.");
   }
   auto protocol = buffer.read_uint32();
-  initiator_id = buffer.read_uint32();
+  auto initiator_id = buffer.read_uint32();
   remote_ssrc = buffer.read_uint32();
   remote_name = buffer.read_str0();
 

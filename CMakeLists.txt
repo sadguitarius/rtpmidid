@@ -4,7 +4,7 @@ project(rtpmidid)
 # Add option to enable/disable tests
 option(ENABLE_TESTS "Enable tests" ON)
 # option to enable precompiled headers
-option(ENABLE_PCH "Enable precompiled headers" ON)
+option(ENABLE_PCH "Enable precompiled headers" OFF)
 # option to easy use clang compiler
 option(USE_CLANG "Use clang compiler" OFF)
 # option force the linker, default mold, if not found lld, if not found default
