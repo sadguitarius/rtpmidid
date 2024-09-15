@@ -19,6 +19,7 @@
 #include <alsa/seq.h>
 #include <alsa/seq_event.h>
 #include <rtpmidid/logger.hpp>
+#include <algorithm>
 
 namespace rtpmididns {
 void error_handler(const char *file, int line, const char *function, int err,
@@ -77,6 +78,34 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
   }
   snd_seq_set_client_name(seq, name.c_str());
   snd_seq_nonblock(seq, 1);
+
+  /* Increase client pool sizes. This determines the max sysex message that
+   * can be received. */
+  snd_seq_client_pool_alloca(&pool);
+  int result;
+  static constexpr size_t min_pool_size = 500;
+  static constexpr size_t max_pool_size = 2000;
+  size_t pool_size;
+  if ((result = snd_seq_get_client_pool(seq, pool)) < 0) {
+    DEBUG("failed to get pool: {}", snd_strerror(result));
+  } else {
+    /* make sure we at least use the default size */
+    pool_size = snd_seq_client_pool_get_output_pool(pool);
+    pool_size = std::max(pool_size, snd_seq_client_pool_get_input_pool(pool));
+
+    /* The kernel ignores values larger than 2000 (by default) so clamp
+     * this here. It's configurable in case the kernel was modified. */
+    pool_size =
+        std::clamp(pool_size, min_pool_size, max_pool_size);
+
+    snd_seq_client_pool_set_input_pool(pool, pool_size);
+    snd_seq_client_pool_set_output_pool(pool, pool_size);
+    snd_seq_client_pool_set_output_room(pool, pool_size);
+
+    if ((result = snd_seq_set_client_pool(seq, pool)) < 0) {
+      WARNING("failed to set pool: {}", snd_strerror(result));
+    }
+  }
 
   snd_seq_client_info_t *info = nullptr;
   snd_seq_client_info_malloc(&info);

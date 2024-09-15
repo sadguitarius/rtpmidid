@@ -95,6 +95,7 @@ public:
 
   std::string name;
   snd_seq_t *seq;
+  snd_seq_client_pool_t *pool;
   // std::vector<int> fds; // Normally 1?
   std::map<int, rtpmidid::signal_t<port_t, const std::string &>>
       subscribe_event;
