@@ -50,7 +50,9 @@ void local_alsa_peer_t::send_midi(midipeer_id_t from, const mididata_t &data) {
     snd_seq_ev_set_source(ev, this->port);
     snd_seq_ev_set_subs(ev); // to all subscribers
     snd_seq_ev_set_direct(ev);
-    snd_seq_event_output_direct(seq->seq, ev);
+    // snd_seq_event_output_direct(seq->seq, ev);
+    snd_seq_event_output(seq->seq, ev);
+    snd_seq_drain_output(seq->seq);
   });
 }
 

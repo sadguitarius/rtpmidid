@@ -155,7 +155,9 @@ void local_alsa_multi_listener_t::send_midi(midipeer_id_t from,
             snd_seq_ev_set_source(ev, this->port);
             snd_seq_ev_set_dest(ev, port.client, port.port);
             snd_seq_ev_set_direct(ev);
-            snd_seq_event_output_direct(seq->seq, ev);
+            // snd_seq_event_output_direct(seq->seq, ev);
+            snd_seq_event_output(seq->seq, ev);
+            snd_seq_drain_output(seq->seq);
           });
     }
   }
