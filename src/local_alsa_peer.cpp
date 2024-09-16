@@ -35,9 +35,10 @@ local_alsa_peer_t::local_alsa_peer_t(const std::string &name_,
   midi_connection = seq->midi_event[port].connect([this](snd_seq_event *ev) {
     rtpmidid::io_bytes_static<1024> data;
     auto datawriter = rtpmidid::io_bytes_writer(data);
-    mididata_decoder.ev_to_mididata(ev, datawriter);
-    auto mididata = mididata_t(datawriter);
-    router->send_midi(peer_id, mididata);
+    mididata_decoder.ev_to_mididata_f(ev, datawriter,
+                                      [this](const mididata_t &mididata) {
+                                        router->send_midi(peer_id, mididata);
+                                      });
   });
 }
 

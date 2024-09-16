@@ -153,9 +153,15 @@ void local_alsa_listener_t::send_midi(midipeer_id_t from,
     snd_seq_ev_set_source(ev, alsaport);
     snd_seq_ev_set_subs(ev); // to all subscribers
     snd_seq_ev_set_direct(ev);
-    // snd_seq_event_output_direct(aseq->seq, ev);
+    DEBUG("Sending {} bytes of encoded data to ALSA port", ev->data.ext.len);
+    // auto result = snd_seq_event_output_direct(aseq->seq, ev);
     snd_seq_event_output(aseq->seq, ev);
-    snd_seq_drain_output(aseq->seq);
+    auto result = snd_seq_drain_output(aseq->seq);
+    if (result < 0) {
+      ERROR("Error: {}", snd_strerror(result));
+    } else {
+      DEBUG("Data sent to ALSA port. {} bytes remaining", result);
+    }
   });
 }
 

@@ -664,23 +664,23 @@ void mididata_to_alsaevents_t::mididata_to_evs_f(
   }
 }
 
-void mididata_to_alsaevents_t::ev_to_mididata(snd_seq_event_t *ev,
-                                              rtpmidid::io_bytes_writer &data) {
-  // TODO: this should maybe manage its own local buffer so we don't have to
-  // allocate for each message. It might make more sense to have a function
-  // pointer in here for sending partial events to the router, but would be
-  // cleaner if this class didn't have to know about the router class.
-  snd_midi_event_reset_decode(buffer);
-  auto ret = snd_midi_event_decode(buffer, data.position,
-                                   data.end - data.position, ev);
-  if (ret < 0) {
-    ERROR("Could not translate alsa seq event. Do nothing.");
-    return;
-  }
-
-  data.position += ret;
-  // DEBUG("ev to mididata, left: {}, {}", ret, data);
-}
+// void mididata_to_alsaevents_t::ev_to_mididata(snd_seq_event_t *ev,
+//                                               rtpmidid::io_bytes_writer &data) {
+//   // TODO: this should maybe manage its own local buffer so we don't have to
+//   // allocate for each message. It might make more sense to have a function
+//   // pointer in here for sending partial events to the router, but would be
+//   // cleaner if this class didn't have to know about the router class.
+//   snd_midi_event_reset_decode(buffer);
+//   auto ret = snd_midi_event_decode(buffer, data.position,
+//                                    data.end - data.position, ev);
+//   if (ret < 0) {
+//     ERROR("Could not translate alsa seq event. Do nothing.");
+//     return;
+//   }
+//
+//   data.position += ret;
+//   // DEBUG("ev to mididata, left: {}, {}", ret, data);
+// }
 
 void mididata_to_alsaevents_t::ev_to_mididata_f(
     snd_seq_event_t *ev, rtpmidid::io_bytes_writer &data,
@@ -722,9 +722,9 @@ void mididata_to_alsaevents_t::ev_to_mididata_f(
         out_buffer.write_uint8(0xF7);
       }
       auto bytes_left =
-          total_bytes - (decode_buffer.position - decode_buffer.start);
+          total_bytes - (decode_buffer.position - decode_buffer.start) - 1;
       if (bytes_left <= 256) {
-        out_buffer.copy_from(decode_buffer, bytes_left - 1); // Don't copy 0xF7
+        out_buffer.copy_from(decode_buffer, bytes_left);
         out_buffer.write_uint8(0xF7);
         const auto mididata = mididata_t(out_buffer);
         func(mididata);
