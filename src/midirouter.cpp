@@ -106,7 +106,7 @@ void midirouter_t::send_midi(uint32_t from, const mididata_t &data) {
 
   // DEBUG("Send data to {} peers", peer->second.send_to.size());
   for (auto to : peerdata->send_to) {
-    // DEBUG("Send data {} to {}", from, to);
+    DEBUG("Send data {} to {}", from, to);
     send_midi(from, to, data);
   }
 }

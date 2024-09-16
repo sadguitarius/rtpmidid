@@ -16,10 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "./aseq.hpp"
+#include <algorithm>
 #include <alsa/seq.h>
 #include <alsa/seq_event.h>
 #include <rtpmidid/logger.hpp>
-#include <algorithm>
 
 namespace rtpmididns {
 void error_handler(const char *file, int line, const char *function, int err,
@@ -83,24 +83,22 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
    * can be received. */
   snd_seq_client_pool_alloca(&pool);
   int result;
-  static constexpr size_t min_pool_size = 500;
-  static constexpr size_t max_pool_size = 2000;
-  size_t pool_size;
+  // static constexpr size_t min_pool_size = 500;
+  // static constexpr size_t max_pool_size = 2000;
+  // size_t pool_size;
   if ((result = snd_seq_get_client_pool(seq, pool)) < 0) {
     DEBUG("failed to get pool: {}", snd_strerror(result));
   } else {
     /* make sure we at least use the default size */
-    pool_size = snd_seq_client_pool_get_output_pool(pool);
-    pool_size = std::max(pool_size, snd_seq_client_pool_get_input_pool(pool));
+    // pool_size = snd_seq_client_pool_get_output_pool(pool);
+    // pool_size = std::max(pool_size, snd_seq_client_pool_get_input_pool(pool));
 
     /* The kernel ignores values larger than 2000 (by default) so clamp
      * this here. It's configurable in case the kernel was modified. */
-    pool_size =
-        std::clamp(pool_size, min_pool_size, max_pool_size);
+    // pool_size = std::clamp(pool_size, min_pool_size, max_pool_size);
 
-    snd_seq_client_pool_set_input_pool(pool, pool_size);
-    snd_seq_client_pool_set_output_pool(pool, pool_size);
-    snd_seq_client_pool_set_output_room(pool, pool_size);
+    snd_seq_client_pool_set_input_pool(pool, 2000);
+    snd_seq_client_pool_set_output_pool(pool, 2000);
 
     if ((result = snd_seq_set_client_pool(seq, pool)) < 0) {
       WARNING("failed to set pool: {}", snd_strerror(result));
@@ -632,8 +630,12 @@ void aseq_t::for_connections(const port_t &port,
   snd_seq_query_subscribe_free(subs);
 }
 
-mididata_to_alsaevents_t::mididata_to_alsaevents_t() : buffer(nullptr) {
-  snd_midi_event_new(1024, &buffer);
+mididata_to_alsaevents_t::mididata_to_alsaevents_t()
+    : buffer(nullptr), decode_buffer_data(131072, 0),
+      decode_buffer(&decode_buffer_data[0], 131072) {
+  // snd_midi_event_new(1024, &buffer);
+  snd_midi_event_new(131072, &buffer);
+  // decode_buffer_data.resize(131072);
 }
 mididata_to_alsaevents_t::~mididata_to_alsaevents_t() {
   if (buffer)
@@ -648,8 +650,8 @@ void mididata_to_alsaevents_t::mididata_to_evs_f(
   snd_midi_event_reset_encode(buffer);
 
   while (data.position < data.end) {
-    // DEBUG("mididata to snd_ev, left {}", data);
-    snd_seq_ev_clear(&ev);
+    DEBUG("mididata to snd_ev, left {}", data);
+    // snd_seq_ev_clear(&ev);
     auto used = snd_midi_event_encode(buffer, data.position,
                                       data.end - data.position, &ev);
     if (used <= 0) {
@@ -664,6 +666,10 @@ void mididata_to_alsaevents_t::mididata_to_evs_f(
 
 void mididata_to_alsaevents_t::ev_to_mididata(snd_seq_event_t *ev,
                                               rtpmidid::io_bytes_writer &data) {
+  // TODO: this should maybe manage its own local buffer so we don't have to
+  // allocate for each message. It might make more sense to have a function
+  // pointer in here for sending partial events to the router, but would be
+  // cleaner if this class didn't have to know about the router class.
   snd_midi_event_reset_decode(buffer);
   auto ret = snd_midi_event_decode(buffer, data.position,
                                    data.end - data.position, ev);
@@ -674,6 +680,65 @@ void mididata_to_alsaevents_t::ev_to_mididata(snd_seq_event_t *ev,
 
   data.position += ret;
   // DEBUG("ev to mididata, left: {}, {}", ret, data);
+}
+
+void mididata_to_alsaevents_t::ev_to_mididata_f(
+    snd_seq_event_t *ev, rtpmidid::io_bytes_writer &data,
+    std::function<void(const mididata_t &)> func) {
+  // TODO: this should maybe manage its own local buffer so we don't have to
+  // allocate for each message. It might make more sense to have a function
+  // pointer in here for sending partial events to the router, but would be
+  // cleaner if this class didn't have to know about the router class.
+  if (ev->type != SND_SEQ_EVENT_SYSEX) {
+    snd_midi_event_reset_decode(buffer);
+    auto ret = snd_midi_event_decode(buffer, data.position,
+                                     data.end - data.position, ev);
+    if (ret < 0) {
+      ERROR("Could not translate alsa seq event. Do nothing.");
+      return;
+    }
+
+    data.position += ret;
+    // DEBUG("ev to mididata, left: {}, {}", ret, data);
+    const auto mididata = mididata_t(data);
+    func(mididata);
+  } else {
+    snd_midi_event_reset_decode(buffer);
+    auto total_bytes = snd_midi_event_decode(buffer, &decode_buffer_data[0],
+                                             ev->data.ext.len, ev);
+    if (total_bytes < 0) {
+      ERROR("Could not translate alsa seq event. Do nothing.");
+      return;
+    }
+    bool start = true;
+
+    while (true) {
+      rtpmidid::io_bytes_writer_static<258> out_buffer;
+      if (start) {
+        decode_buffer.position += 1;
+        out_buffer.write_uint8(0xF0);
+        start = false;
+      } else {
+        out_buffer.write_uint8(0xF7);
+      }
+      auto bytes_left =
+          total_bytes - (decode_buffer.position - decode_buffer.start);
+      if (bytes_left <= 256) {
+        out_buffer.copy_from(decode_buffer, bytes_left - 1); // Don't copy 0xF7
+        out_buffer.write_uint8(0xF7);
+        const auto mididata = mididata_t(out_buffer);
+        func(mididata);
+        decode_buffer.position = decode_buffer.start;
+        return;
+      } else {
+        out_buffer.copy_from(decode_buffer, 256); // Don't copy 0xF7
+        out_buffer.write_uint8(0xF0);
+        const auto mididata = mididata_t(out_buffer);
+        func(mididata);
+        decode_buffer.position += 256;
+      }
+    }
+  }
 }
 
 } // namespace rtpmididns

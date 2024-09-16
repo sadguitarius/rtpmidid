@@ -1,9 +1,6 @@
 # Port for test run
 PORT:=10000
 # Number of jobs for make
-ifeq ($(JOBS),)
-	JOBS:=$(shell nproc)
-endif
 
 # To easy change to clang, set CXX.
 # ENABLE_PCH sound like a good idea, but for massive parallelist (my comp has 32 CPU threads), it
@@ -40,13 +37,13 @@ build: build/bin/rtpmidid
 
 build/bin/rtpmidid: src/* tests/* CMakeLists.txt
 	mkdir -p build
-	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -GNinja $(CMAKE_EXTRA_ARGS)
+	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -GNinja $(CMAKE_EXTRA_ARGS)
 	cd build && ninja
 
 build-dev:
 	mkdir -p build
-	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug $(CMAKE_EXTRA_ARGS)
-	cd build && make -j$(JOBS)
+	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=OFF $(CMAKE_EXTRA_ARGS)
+	cd build && make
 
 build-deb:
 	mkdir -p build
@@ -55,8 +52,8 @@ build-deb:
 
 build-make:
 	mkdir -p build
-	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -GMakefile $(CMAKE_EXTRA_ARGS)
-	cd build && make -j$(JOBS)
+	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -GMakefile $(CMAKE_EXTRA_ARGS)
+	cd build && make
 
 
 man:

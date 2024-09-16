@@ -557,8 +557,8 @@ void rtppeer_t::parse_midi(io_bytes_reader &buffer) {
     }
     buffer.skip(length);
 
-    // DEBUG("Remaining: {}, size: {}, left: {}", remaining, buffer.size(),
-    //       buffer.size() - buffer.pos());
+    DEBUG("Remaining: {}, size: {}, left: {}", remaining, buffer.size(),
+          buffer.size() - buffer.pos());
 
     if (remaining) {
       // DEBUG("Packet with several midi events. {} bytes remaining",
@@ -575,14 +575,14 @@ void rtppeer_t::parse_sysex(io_bytes_reader &buffer, int16_t length) {
   auto last_byte = *(buffer.position + length - 1);
 
   if (!sysex.empty()) {
-    // DEBUG("Read SysEx cont. {:x} ... {:x} ({:p})", *buffer.position,
-    // last_byte, buffer.position);
+    DEBUG("Read SysEx cont. {:x} ... {:x} ({:p})", *buffer.position, last_byte,
+          (void *)buffer.position);
     if (*buffer.position != 0xF7) {
       throw rtpmidid::bad_sysex_exception("Next packet does not start with F7");
     }
     std::copy(buffer.position + 1, buffer.position + length - 1,
               std::back_inserter(sysex));
-    // DEBUG("Sysex size: {}", sysex.size());
+    DEBUG("Sysex size: {}", sysex.size());
     // io_bytes(&sysex[0], sysex.size()).print_hex();
 
     // Final packet
@@ -595,7 +595,7 @@ void rtppeer_t::parse_sysex(io_bytes_reader &buffer, int16_t length) {
         return;
       }
       auto sysexreader = io_bytes_reader(&sysex[1], sysex.size() - 1);
-      // DEBUG("Send sysex {}", sysex.size());
+      DEBUG("Send sysex {}", sysex.size());
       // sysexreader.print_hex();
       midi_event(sysexreader);
       sysex.clear();
@@ -613,14 +613,14 @@ void rtppeer_t::parse_sysex(io_bytes_reader &buffer, int16_t length) {
       throw rtpmidid::bad_sysex_exception("Bad sysex end byte");
     }
   } else if (*buffer.position == 0xF0) {
-    // DEBUG("Read SysEx. {:x} ... {:x} ({:p})", *buffer.position, last_byte,
-    //       buffer.position);
+    DEBUG("Read SysEx. {:x} ... {:x} ({:p})", *buffer.position, last_byte,
+          (void *)buffer.position);
     if (last_byte == 0xF7) { // Normal packet
-      // DEBUG("Read normal sysex packet");
+      DEBUG("Read normal sysex packet");
       io_bytes midi(buffer.position, length);
       midi_event(midi);
     } else {
-      // DEBUG("First part");
+      DEBUG("First part");
       sysex.clear();
       std::copy(buffer.position - 1, buffer.position + length - 1,
                 std::back_inserter(sysex));
