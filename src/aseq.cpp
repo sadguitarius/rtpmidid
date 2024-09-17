@@ -77,26 +77,16 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
         "Can't open sequencer. Maybe user has no permissions.");
   }
   snd_seq_set_client_name(seq, name.c_str());
+  // TODO: does nonblock mode mess with long sysex messages?
   snd_seq_nonblock(seq, 1);
 
   /* Increase client pool sizes. This determines the max sysex message that
    * can be received. */
   snd_seq_client_pool_alloca(&pool);
   int result;
-  // static constexpr size_t min_pool_size = 500;
-  // static constexpr size_t max_pool_size = 2000;
-  // size_t pool_size;
   if ((result = snd_seq_get_client_pool(seq, pool)) < 0) {
     DEBUG("failed to get pool: {}", snd_strerror(result));
   } else {
-    /* make sure we at least use the default size */
-    // pool_size = snd_seq_client_pool_get_output_pool(pool);
-    // pool_size = std::max(pool_size, snd_seq_client_pool_get_input_pool(pool));
-
-    /* The kernel ignores values larger than 2000 (by default) so clamp
-     * this here. It's configurable in case the kernel was modified. */
-    // pool_size = std::clamp(pool_size, min_pool_size, max_pool_size);
-
     snd_seq_client_pool_set_input_pool(pool, 2000);
     snd_seq_client_pool_set_output_pool(pool, 2000);
 
@@ -123,10 +113,10 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
   // DEBUG("Got {} pollers", poller_count);
   for (int i = 0; i < poller_count; i++) {
     // fds.push_back(pfds[i].fd);
-    // DEBUG("Adding fd {} as alsa seq", pfds[i].fd);
+    DEBUG("Adding fd {} as alsa seq", pfds[i].fd);
     aseq_listener.emplace_back(
         rtpmidid::poller.add_fd_in(pfds[i].fd, [this](int) {
-          // INFO("New event at alsa seq");
+          INFO("New event at alsa seq");
           this->read_ready();
         }));
   }
@@ -154,6 +144,13 @@ aseq_t::~aseq_t() {
  *                      bandwidth.
  */
 void aseq_t::read_ready() {
+  auto pending = snd_seq_event_input_pending(seq, 1);
+  if (pending >= 0) {
+    DEBUG("ALSA pending events: {}", snd_seq_event_input_pending(seq, 1));
+  } else {
+    DEBUG("Error: {}", snd_strerror(pending));
+    snd_seq_drop_input(seq);
+  }
   snd_seq_event_t *ev = nullptr;
   while (snd_seq_event_input(seq, &ev) > 0) {
     // DEBUG("ALSA MIDI event: {}, pending: {} / {}", ev->type, pending,
