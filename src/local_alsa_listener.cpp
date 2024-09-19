@@ -80,6 +80,7 @@ local_alsa_listener_t::local_alsa_listener_t(const std::string &name_,
             ev, datawriter, [this](const mididata_t &mididata) {
               router->send_midi(peer_id, mididata);
             });
+        DEBUG("Data decoded and sent to router");
       });
 }
 
@@ -159,13 +160,13 @@ void local_alsa_listener_t::send_midi(midipeer_id_t from,
     if (result < 0) {
       ERROR("Error: {}", snd_strerror(result));
     } else {
-      DEBUG("snd_seq_event_output: {} bytes remaining", result);
+      // DEBUG("snd_seq_event_output: {} bytes remaining", result);
     }
     result = snd_seq_drain_output(aseq->seq);
     if (result < 0) {
       ERROR("Error: {}", snd_strerror(result));
     } else {
-      DEBUG("snd_seq_drain_output: {} bytes remaining", result);
+      // DEBUG("snd_seq_drain_output: {} bytes remaining", result);
     }
   });
 }

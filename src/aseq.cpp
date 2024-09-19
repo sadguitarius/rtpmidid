@@ -72,13 +72,13 @@ snd_seq_addr_t *get_my_ev_client_port(snd_seq_event_t *ev, uint8_t client_id) {
 }
 aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
   snd_lib_error_set_handler(error_handler);
-  if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, 0) < 0) {
+  // TODO: does nonblock mode mess with long sysex messages?
+  if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, SND_SEQ_NONBLOCK) <
+      0) {
     throw alsa_connect_exception(
         "Can't open sequencer. Maybe user has no permissions.");
   }
   snd_seq_set_client_name(seq, name.c_str());
-  // TODO: does nonblock mode mess with long sysex messages?
-  snd_seq_nonblock(seq, 1);
 
   /* Increase client pool sizes. This determines the max sysex message that
    * can be received. */
@@ -647,7 +647,7 @@ void mididata_to_alsaevents_t::mididata_to_evs_f(
   snd_midi_event_reset_encode(buffer);
 
   while (data.position < data.end) {
-    DEBUG("mididata to snd_ev, left {}", data);
+    // DEBUG("mididata to snd_ev, left {}", data);
     // snd_seq_ev_clear(&ev);
     auto used = snd_midi_event_encode(buffer, data.position,
                                       data.end - data.position, &ev);
@@ -662,7 +662,8 @@ void mididata_to_alsaevents_t::mididata_to_evs_f(
 }
 
 // void mididata_to_alsaevents_t::ev_to_mididata(snd_seq_event_t *ev,
-//                                               rtpmidid::io_bytes_writer &data) {
+//                                               rtpmidid::io_bytes_writer
+//                                               &data) {
 //   // TODO: this should maybe manage its own local buffer so we don't have to
 //   // allocate for each message. It might make more sense to have a function
 //   // pointer in here for sending partial events to the router, but would be
