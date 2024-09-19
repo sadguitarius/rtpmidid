@@ -95,6 +95,9 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
     }
   }
 
+  snd_seq_set_input_buffer_size(seq, 131072);
+  snd_seq_set_output_buffer_size(seq, 131072);
+
   snd_seq_client_info_t *info = nullptr;
   snd_seq_client_info_malloc(&info);
   snd_seq_get_client_info(seq, info);
