@@ -57,16 +57,12 @@ void local_alsa_peer_t::send_midi(midipeer_id_t from, const mididata_t &data) {
       ERROR("Error: {}", snd_strerror(result));
       snd_seq_drop_input(seq->seq);
       snd_seq_drop_output(seq->seq);
-    } else {
-      DEBUG("snd_seq_event_output: {} bytes remaining", result);
     }
     result = snd_seq_drain_output(seq->seq);
     if (result < 0) {
       ERROR("Error: {}", snd_strerror(result));
       snd_seq_drop_input(seq->seq);
       snd_seq_drop_output(seq->seq);
-    } else {
-      DEBUG("snd_seq_drain_output: {} bytes remaining", result);
     }
   });
 }

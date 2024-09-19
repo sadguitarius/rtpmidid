@@ -69,18 +69,11 @@ local_alsa_listener_t::local_alsa_listener_t(const std::string &name_,
       aseq->midi_event[alsaport].connect([this](snd_seq_event_t *ev) {
         rtpmidid::io_bytes_static<1024> data;
         auto datawriter = rtpmidid::io_bytes_writer(data);
-        // TODO: if long sysex, either segment here or in ev_to_mididata
-        if (ev->type == SND_SEQ_EVENT_SYSEX) {
-          DEBUG("ALSA Sysex event with size {} received on port {}",
-                ev->data.ext.len, alsaport);
-        } else {
-          DEBUG("ALSA MIDI event received on port {}", alsaport);
-        }
         mididata_decoder.ev_to_mididata_f(
             ev, datawriter, [this](const mididata_t &mididata) {
               router->send_midi(peer_id, mididata);
             });
-        DEBUG("Data decoded and sent to router");
+        // DEBUG("Data decoded and sent to router");
       });
 }
 
@@ -147,30 +140,25 @@ void local_alsa_listener_t::disconnect_from_remote_server() {
 void local_alsa_listener_t::send_midi(midipeer_id_t from,
                                       const mididata_t &data) {
   mididata_t mididata{data};
-  // TODO: use aseqdump to find largest message that will pass through to ALSA
-  DEBUG("Translating RTPMIDI event with size {} to ALSA seq event",
-        data.size());
+  // DEBUG("Translating RTPMIDI event with size {} to ALSA seq event",
+  //       data.size());
   mididata_encoder.mididata_to_evs_f(mididata, [this](snd_seq_event_t *ev) {
     snd_seq_ev_set_source(ev, alsaport);
     snd_seq_ev_set_subs(ev); // to all subscribers
     snd_seq_ev_set_direct(ev);
-    DEBUG("Sending {} bytes of encoded data to ALSA port", ev->data.ext.len);
+    // DEBUG("Sending {} bytes of encoded data to ALSA port", ev->data.ext.len);
     // auto result = snd_seq_event_output_direct(aseq->seq, ev);
     auto result = snd_seq_event_output(aseq->seq, ev);
     if (result < 0) {
       ERROR("Error: {}", snd_strerror(result));
       snd_seq_drop_input(aseq->seq);
       snd_seq_drop_output(aseq->seq);
-    } else {
-      DEBUG("snd_seq_event_output: {} bytes remaining", result);
     }
     result = snd_seq_drain_output(aseq->seq);
     if (result < 0) {
       ERROR("Error: {}", snd_strerror(result));
       snd_seq_drop_input(aseq->seq);
       snd_seq_drop_output(aseq->seq);
-    } else {
-      DEBUG("snd_seq_drain_output: {} bytes remaining", result);
     }
   });
 }

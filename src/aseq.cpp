@@ -72,7 +72,6 @@ snd_seq_addr_t *get_my_ev_client_port(snd_seq_event_t *ev, uint8_t client_id) {
 }
 aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
   snd_lib_error_set_handler(error_handler);
-  // TODO: does nonblock mode mess with long sysex messages?
   if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, SND_SEQ_NONBLOCK) <
       0) {
     throw alsa_connect_exception(
@@ -119,7 +118,7 @@ aseq_t::aseq_t(std::string _name) : name(std::move(_name)), seq(nullptr) {
     DEBUG("Adding fd {} as alsa seq", pfds[i].fd);
     aseq_listener.emplace_back(
         rtpmidid::poller.add_fd_in(pfds[i].fd, [this](int) {
-          INFO("New event at alsa seq");
+          // INFO("New event at alsa seq");
           this->read_ready();
         }));
   }
@@ -147,13 +146,6 @@ aseq_t::~aseq_t() {
  *                      bandwidth.
  */
 void aseq_t::read_ready() {
-  auto pending = snd_seq_event_input_pending(seq, 1);
-  if (pending >= 0) {
-    DEBUG("ALSA pending events: {}", snd_seq_event_input_pending(seq, 1));
-  } else {
-    DEBUG("Error: {}", snd_strerror(pending));
-    snd_seq_drop_input(seq);
-  }
   snd_seq_event_t *ev = nullptr;
   while (snd_seq_event_input(seq, &ev) > 0) {
     // DEBUG("ALSA MIDI event: {}, pending: {} / {}", ev->type, pending,
