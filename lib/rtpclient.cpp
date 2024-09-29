@@ -29,8 +29,8 @@
 using namespace std::chrono_literals;
 using namespace rtpmidid;
 
-static const auto CONNECT_TIMEOUT = 2s;
-static const auto RECONNECT_TIMEOUT = 10s;
+static const auto CONNECT_TIMEOUT = 10s;
+static const auto RECONNECT_TIMEOUT = 30s;
 static const auto CK_SHORT_PERIOD = 2s;
 static const auto CK_LONG_PERIOD = 25s;
 
@@ -275,7 +275,7 @@ void rtpclient_t::state_send_ck_short() {
     } else {
       handle_event(LatencyMeasured);
     }
-    ck_connection = peer.ck_event.connect([this](float ms) {
+    ck_connection = peer.ck_event.connect([](float ms) {
       WARNING("OUT OF ORDER CK0 received, latency: {} ms", ms);
     });
   });
@@ -296,7 +296,7 @@ void rtpclient_t::state_send_ck_long() {
   ck_connection = peer.ck_event.connect([this](float ms) {
     timer.disable();
     handle_event(WaitSendCK);
-    ck_connection = peer.ck_event.connect([this](float ms) {
+    ck_connection = peer.ck_event.connect([](float ms) {
       WARNING("OUT OF ORDER CK0 received, latency: {} ms", ms);
     });
   });
