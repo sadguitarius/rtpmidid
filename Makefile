@@ -5,11 +5,6 @@ ifeq ($(JOBS),)
 	JOBS:=$(shell nproc)
 endif
 
-# To easy change to clang, set CXX.
-# ENABLE_PCH sound like a good idea, but for massive parallelist (my comp has 32 CPU threads), it
-# stalls the parallelist waiting to compile the Pre Compiled Headers.
-# CMAKE_EXTRA_ARGS := -DCMAKE_CXX_COMPILER=${CXX}
-
 
 .PHONY: help
 help:
@@ -41,7 +36,7 @@ build: build/bin/rtpmidid
 build/bin/rtpmidid: src/* tests/* CMakeLists.txt
 	mkdir -p build
 	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -GNinja $(CMAKE_EXTRA_ARGS)
-	cd build && ninja
+	cd build && ninja -j$(JOBS)
 
 build-dev:
 	mkdir -p build
@@ -51,7 +46,7 @@ build-dev:
 build-deb:
 	mkdir -p build
 	cd build &&	cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -GNinja $(CMAKE_EXTRA_ARGS) -DLDD=system
-	cd build && ninja
+	cd build && ninja -j$(JOBS)
 
 build-make:
 	mkdir -p build
