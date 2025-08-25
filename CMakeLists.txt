@@ -4,11 +4,11 @@ project(rtpmidid)
 # Add option to enable/disable tests
 option(ENABLE_TESTS "Enable tests" ON)
 # option to enable precompiled headers
-option(ENABLE_PCH "Enable precompiled headers" ON)
+option(ENABLE_PCH "Enable precompiled headers" OFF)
 # option to easy use clang compiler
 option(USE_CLANG "Use clang compiler" OFF)
 # option force the linker, default mold, if not found lld, if not found default
-set(LDD "auto" CACHE STRING "Use ldd linker (mold | lld | auto)")
+set(LDD "ld" CACHE STRING "Use ldd linker (ld | mold | lld | auto)")
 # option to use C++20 instead of C++17. With C++20 no need for FMT
 set(CPP_VERSION "auto" CACHE STRING "Use given C++  version. 17 and 20 supported")
 # option to force use fmt, depends on CPP20
@@ -62,7 +62,7 @@ if (LDD STREQUAL "auto")
   find_program(MOLD mold)
   if (MOLD)
     message(STATUS "Using mold linker")
-    add_link_options("-fuse-ld=lld")
+    add_link_options("-fuse-ld=mold")
   else()
     find_program(LLD lld)
     if (LLD)
@@ -76,7 +76,7 @@ elseif (LLD STREQUAL "mold")
   find_program(MOLD mold)
   if (MOLD)
     message(STATUS "Using mold linker")
-    add_link_options("-fuse-ld=lld")
+    add_link_options("-fuse-ld=mold")
   else()
     message(FATAL_ERROR "mold linker not found")
   endif()
